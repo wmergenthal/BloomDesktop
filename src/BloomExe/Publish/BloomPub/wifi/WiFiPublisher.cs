@@ -23,7 +23,8 @@ namespace Bloom.Publish.BloomPub.wifi
         private readonly BookServer _bookServer;
         private readonly WebSocketProgress _progress;
         private WiFiAdvertiser _wifiAdvertiser;
-        private BloomReaderUDPListener _wifiListener;
+        //private BloomReaderUDPListener _wifiListener;
+        private BloomReaderTCPListener _wifiListener;
         public const string ProtocolVersion = "2.0";
 
         // This is the web client we use in StartSendBookToClientOnLocalSubNet() to send a book to an android.
@@ -53,12 +54,20 @@ namespace Bloom.Publish.BloomPub.wifi
                 Stop();
             }
 
+            // WM - experiment: change Reader's reply to UDP advertisement from UDP to TCP.
+            // Here, the Desktop side will need receiving code that speaks TCP.
+            // Seems like the biggest change will be to replace BloomReaderUDPListener with
+            // something that acts as similarly as possible but uses TCP instead of UDP.
+            // Maybe call it BloomReaderTCPListener?
+
             // This listens for a BloomReader to request a book.
             // It requires a firewall hole allowing Bloom to receive messages on _portToListen.
             // We initialize it before starting the Advertiser to avoid any chance of a race condition
             // where a BloomReader manages to request an advertised book before we start the listener.
-            Debug.WriteLine("WM, WiFiPublisher::Start, creating BloomReaderUDPListener"); // WM, temporary
-            _wifiListener = new BloomReaderUDPListener();
+            //Debug.WriteLine("WM, WiFiPublisher::Start, creating BloomReaderUDPListener"); // WM, temporary
+            //_wifiListener = new BloomReaderUDPListener();
+            Debug.WriteLine("WM, WiFiPublisher::Start, creating BloomReaderTCPListener"); // WM, temporary
+            _wifiListener = new BloomReaderTCPListener();
             _wifiListener.NewMessageReceived += (sender, args) =>
             {
                 var json = Encoding.UTF8.GetString(args.Data);
@@ -108,7 +117,8 @@ namespace Bloom.Publish.BloomPub.wifi
             };
 
             var pathHtmlFile = book.GetPathHtmlFile();
-            Debug.WriteLine("WM, WiFiPublisher::Start, book's pathHtmlFile = " + pathHtmlFile + ", instantiating _wifiAdvertiser"); // WM, temporary
+            Debug.WriteLine("WM, WiFiPublisher::Start, book's pathHtmlFile = " + pathHtmlFile); // WM, temporary
+            Debug.WriteLine("WM, WiFiPublisher::Start, instantiating _wifiAdvertiser"); // WM, temporary
             _wifiAdvertiser = new WiFiAdvertiser(_progress)
             {
                 BookTitle = BookStorage.SanitizeNameForFileSystem(book.Title), // must be the exact same name as the file we will send if requested
