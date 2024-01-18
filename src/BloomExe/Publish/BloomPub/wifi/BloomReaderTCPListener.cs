@@ -22,10 +22,10 @@ namespace Bloom.Publish.BloomPub.wifi
         // since that UDP channel is not used...
         // ListenForTCPMessages() is based on example TCP *server* code from:
         //     https://www.geeksforgeeks.org/socket-programming-in-c-sharp/
-        // This same page also has an example TCP *client*, which goes in Bloom Reader.
+        // This same page also has an example TCP *client*, which will benefit Bloom Reader.
 
-        //private int _portToListen = 5915;
-        private int _portToListen = 80;  // WM, temporarily try standard HTTP port
+        private int _portToListen = 5915;
+        //private int _portToListen = 80;  // WM, temporarily try standard HTTP port
         Thread _listeningThread;
         public event EventHandler<AndroidMessageArgs> NewMessageReceived;
         //UdpClient _listener = null;
@@ -125,13 +125,14 @@ namespace Bloom.Publish.BloomPub.wifi
                     // Raise event for WiFiPublisher to notice and act on.
                     // Not sure if this should come before or after ASCII conversion...
                     Debug.WriteLine("WM, TCP-listener, got {0} bytes from Reader, raising NewMessageReceived", inLen);
-                    // *** I AM HERE. HOW TO RAISE THIS EVENT TO WiFiPublisher...
                     NewMessageReceived?.Invoke(this, new AndroidMessageArgs(inBuf));
 
                     // Convert incoming raw bytes to ASCII.
                     string inBufString = Encoding.ASCII.GetString(inBuf, 0, inLen);
                     Debug.WriteLine("WM, TCP-listener, message {0} from Reader:", incomingMsgId++);
                     //Debug.WriteLine("  {0} ", inBufString);
+                    // ********* following line throws exception,
+                    // System.ArgumentOutOfRangeException: startIndex must be less than length of string
                     Debug.WriteLine("  {0}", inBufString.Remove(inLen)); // only show 'inLen' num of chars
 
                     // Close connection (actual book transfer is done elsewhere, by SyncServer).
