@@ -10,8 +10,8 @@ namespace Bloom.Publish.BloomPub.wifi
 {
     /// <summary>
     /// Helper class to listen for a TCP reply from the Android. Construct an instance to start
-    /// listening (on another thread);
-    /// ??? hook NewMessageReceived to receive a packet each time a client sends it. ???
+    /// listening (on another thread). When a reply is detected, raise event NewMessageReceived
+    /// to process it.
     /// </summary>
     class BloomReaderTCPListener
     {
@@ -25,21 +25,19 @@ namespace Bloom.Publish.BloomPub.wifi
         // This same page also has an example TCP *client*, which will benefit Bloom Reader.
 
         private int _portToListen = 5915;
-        //private int _portToListen = 80;  // WM, temporarily try standard HTTP port
         Thread _listeningThread;
         public event EventHandler<AndroidMessageArgs> NewMessageReceived;
-        //UdpClient _listener = null;
-        //TcpClient _listener = null;  // WM, try sockets first? may end up using this...
         private bool _listening;
+        private int _advertMaxLengthExpected = 512;  // WM, more than enough, yes?
 
         // constructor: starts listening.
         public BloomReaderTCPListener()
         {
-            Debug.WriteLine("WM, BloomReaderTCPListener, creating thread");
+            Debug.WriteLine("WM, BloomReaderTCPListener, creating thread"); // WM, temporary
             //_listeningThread = new Thread(ListenForUDPPackages);
             _listeningThread = new Thread(ListenForTCPMessages);
             _listeningThread.IsBackground = true;
-            Debug.WriteLine("WM, BloomReaderTCPListener, starting thread");
+            Debug.WriteLine("WM, BloomReaderTCPListener, starting thread"); // WM, temporary
             _listeningThread.Start();
             _listening = true;
         }
@@ -47,29 +45,12 @@ namespace Bloom.Publish.BloomPub.wifi
         /// <summary>
         /// Run on a background thread; returns only when done listening.
         /// </summary>
-        //public void ListenForUDPPackages()
         public void ListenForTCPMessages()
         {
-            //try
-            //{
-            //    _listener = new UdpClient(_portToListen);  // *** HOW TO DO THIS FOR TCP?
-            //}
-            //catch (SocketException e)
-            //{
-            //    //log then do nothing
-            //    Bloom.Utils.MiscUtils.SuppressUnusedExceptionVarWarning(e);
-            //}
-            //
-            //if (_listener == null) {
-            //    Debug.WriteLine("ListenForTCPMessages, error (null _listener), returning");
-            //    return;
-            //}
-
             // Establish the local endpoint for the socket.
-            // Dns.GetHostName returns the name of the host running the application.
             //
-            // Question: like in tcp_client.cs, shouldn't this stuff be in a try/catch?
-            string hostName = Dns.GetHostName();
+            // Question: should some of this stuff be in a try/catch?
+            string hostName = Dns.GetHostName();  // get name of host running this app
             Debug.WriteLine("WM, TCP-listener, hostname = " + hostName);
 
             //string ip = Dns.GetHostByName(hostName).AddressList[0].ToString(); -- deprecated per VS 2022,
@@ -77,6 +58,8 @@ namespace Bloom.Publish.BloomPub.wifi
             // to list ALL a host's addresses:
             IPHostEntry myHost = Dns.GetHostEntry(hostName);
             IPAddress[] myIpAddresses = myHost.AddressList;
+
+            // For debug only.
             Debug.WriteLine("WM, TCP-listener, IP address list:");
             for (int i = 0; i < myIpAddresses.Length; i++) {
                 Debug.WriteLine("   IP address[" + i + "] = " + myIpAddresses[i].ToString());
@@ -86,10 +69,11 @@ namespace Bloom.Publish.BloomPub.wifi
             // interface's IPv4 address, which happens to be [6] (refer to the generated
             // console output).
             // Yes, of course a hardcoded index like this is not acceptable for real code.
+            // Will implement something better.
             IPAddress ipAddr = myHost.AddressList[6];
 
             // Create the endpoint and socket.
-            Debug.WriteLine("WM, TCP-listener, creating listener on " + myIpAddresses[6]);
+            Debug.WriteLine("WM, TCP-listener, creating listener on " + myIpAddresses[6]); // WM, temporary
             IPEndPoint localEndPoint = new IPEndPoint(ipAddr, _portToListen);
             Socket listener = new Socket(ipAddr.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
 
@@ -108,37 +92,36 @@ namespace Bloom.Publish.BloomPub.wifi
 
                 while (true)
                 {
-                    Debug.WriteLine("WM, TCP-listener, waiting for connection...");
+                    Debug.WriteLine("WM, TCP-listener, waiting for connection..."); // WM, temporary
 
                     // Create socket for newly created connection. Bind() and Listen()
                     // must have previously been called. This is a blocking call.
                     Socket clientSocket = listener.Accept();
 
-                    // Got connection. Create buffer to receive message from the client,
-                    // and a string into which the message will be converted.
-                    Debug.WriteLine("WM, TCP-listener, connection started");
-                    byte[] inBuf = new Byte[1024];
+                    // Got connection. Create buffer to receive message from the client.
+                    Debug.WriteLine("WM, TCP-listener, connection started"); // WM, temporary
+                    byte[] inBuf = new Byte[_advertMaxLengthExpected];
 
                     // Receive incoming message. 'inLen' tells how long it is.
                     int inLen = clientSocket.Receive(inBuf);
 
-                    // Raise event for WiFiPublisher to notice and act on.
-                    // Not sure if this should come before or after ASCII conversion...
-                    Debug.WriteLine("WM, TCP-listener, got {0} bytes from Reader, raising NewMessageReceived", inLen);
+                    // For debug only: convert incoming raw bytes to ASCII.
+                    //string inBufString = Encoding.ASCII.GetString(inBuf, 0, inLen);
+                    var inBufString = Encoding.ASCII.GetString(inBuf, 0, inLen);
+
+                    // Raise event for WiFiPublisher to notice and act on -- this is what
+                    // actually gets the book sent to Reader.
+                    Debug.WriteLine("WM, TCP-listener, got {0} bytes from Reader, raising NewMessageReceived", inLen); // WM, temporary
                     NewMessageReceived?.Invoke(this, new AndroidMessageArgs(inBuf));
 
-                    // Convert incoming raw bytes to ASCII.
-                    string inBufString = Encoding.ASCII.GetString(inBuf, 0, inLen);
+                    // Debug only: show the request from Reader (which is 'inLen' bytes long).
                     Debug.WriteLine("WM, TCP-listener, message {0} from Reader:", incomingMsgId++);
-                    //Debug.WriteLine("  {0} ", inBufString);
-                    // ********* following line throws exception,
-                    // System.ArgumentOutOfRangeException: startIndex must be less than length of string
-                    Debug.WriteLine("  {0}", inBufString.Remove(inLen)); // only show 'inLen' num of chars
+                    Debug.WriteLine("   msg=" + inBufString.Substring(0, inLen));
 
                     // Close connection (actual book transfer is done elsewhere, by SyncServer).
                     clientSocket.Shutdown(SocketShutdown.Both);
                     clientSocket.Close();
-                    Debug.WriteLine("WM, TCP-listener, connection closed");
+                    Debug.WriteLine("WM, TCP-listener, connection closed"); // WM, temporary
                 }
             }
             catch (Exception e)
@@ -149,19 +132,17 @@ namespace Bloom.Publish.BloomPub.wifi
 
         public void StopListener()
         {
-            Debug.WriteLine("WM, StopListener, called");
+            Debug.WriteLine("WM, StopListener, called"); // WM, temporary
             if (_listening) {
                 _listening = false;
-                //_listener?.Close(); // forcibly end communication
-                //_listener = null;
             }
 
             if (_listeningThread == null) {
+                Debug.WriteLine("WM, StopListener, _listeningThread null, bail"); // WM, temporary
                 return;
             }
 
-            // Since we told the listener to close already this shouldn't have to do much (nor be dangerous)
-            Debug.WriteLine("WM, StopListener, stopping and deleting thread");
+            Debug.WriteLine("WM, StopListener, stopping and deleting _listeningThread"); // WM, temporary
             _listeningThread.Abort();
             _listeningThread.Join(2 * 1000);
             _listeningThread = null;
