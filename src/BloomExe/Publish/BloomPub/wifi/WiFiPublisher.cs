@@ -68,6 +68,7 @@ namespace Bloom.Publish.BloomPub.wifi
             //_wifiListener = new BloomReaderUDPListener();
             Debug.WriteLine("WM, WiFiPublisher::Start, creating BloomReaderTCPListener"); // WM, temporary
             _wifiListener = new BloomReaderTCPListener();
+            Debug.WriteLine("WM, WiFiPublisher::Start, BloomReaderTCPListener created"); // WM, temporary
             _wifiListener.NewMessageReceived += (sender, args) =>
             {
                 var json = Encoding.UTF8.GetString(args.Data);

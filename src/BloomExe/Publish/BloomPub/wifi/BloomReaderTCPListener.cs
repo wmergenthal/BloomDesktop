@@ -29,7 +29,7 @@ namespace Bloom.Publish.BloomPub.wifi
         Thread _listeningThread;
         public event EventHandler<AndroidMessageArgs> NewMessageReceived;
         //UdpClient _listener = null;
-        TcpClient _listener = null;  // WM, try sockets first? may end up using this...
+        //TcpClient _listener = null;  // WM, try sockets first? may end up using this...
         private bool _listening;
 
         // constructor: starts listening.
@@ -116,25 +116,25 @@ namespace Bloom.Publish.BloomPub.wifi
 
                     // Got connection. Create buffer to receive message from the client,
                     // and a string into which the message will be converted.
-                    Console.WriteLine("WM, TCP-listener, connection started");
+                    Debug.WriteLine("WM, TCP-listener, connection started");
                     byte[] inBuf = new Byte[1024];
-                    //string data = null;
 
-                    // Receive incoming message. 'inLen' shows how long it is.
+                    // Receive incoming message. 'inLen' tells how long it is.
                     int inLen = clientSocket.Receive(inBuf);
+
+                    // Raise event for WiFiPublisher to notice and act on.
+                    // Not sure if this should come before or after ASCII conversion...
+                    Debug.WriteLine("WM, TCP-listener, got {0} bytes from Reader, raising NewMessageReceived", inLen);
+                    // *** I AM HERE. HOW TO RAISE THIS EVENT TO WiFiPublisher...
+                    NewMessageReceived?.Invoke(this, new AndroidMessageArgs(inBuf));
 
                     // Convert incoming raw bytes to ASCII.
                     string inBufString = Encoding.ASCII.GetString(inBuf, 0, inLen);
-                    Debug.WriteLine("WM, TCP-listener, message {0} from Reader, {1} bytes:", incomingMsgId++, inLen);
-                    Debug.WriteLine("  {0} ", inBufString);  // *** ONLY PUT OUT 'inLen' NUMBER OF CHARS
+                    Debug.WriteLine("WM, TCP-listener, message {0} from Reader:", incomingMsgId++);
+                    //Debug.WriteLine("  {0} ", inBufString);
+                    Debug.WriteLine("  {0}", inBufString.Remove(inLen)); // only show 'inLen' num of chars
 
-                    // Create and send a message back to client (Reader).
-                    //byte[] reply = Encoding.ASCII.GetBytes("Bloom Desktop here - huzzah!");
-                    //clientSocket.Send(reply);
-                    //Debug.WriteLine("Reply sent to Reader, {0} bytes", reply.Length);
-
-                    // Close connection. The actual book transfer is done elsewhere,
-                    // by SyncServer which already exists; no need to change it.
+                    // Close connection (actual book transfer is done elsewhere, by SyncServer).
                     clientSocket.Shutdown(SocketShutdown.Both);
                     clientSocket.Close();
                     Debug.WriteLine("WM, TCP-listener, connection closed");
@@ -151,8 +151,8 @@ namespace Bloom.Publish.BloomPub.wifi
             Debug.WriteLine("WM, StopListener, called");
             if (_listening) {
                 _listening = false;
-                //_listener?.Close(); // forcibly end communication  // WM, can omit?
-                //_listener = null;                                  // WM, can omit?
+                //_listener?.Close(); // forcibly end communication
+                //_listener = null;
             }
 
             if (_listeningThread == null) {
