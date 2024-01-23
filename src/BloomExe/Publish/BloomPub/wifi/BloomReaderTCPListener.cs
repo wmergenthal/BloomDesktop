@@ -1,13 +1,10 @@
 using System;
-using System.Collections.Generic;
 using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading;
 using Bloom.Publish.BloomPUB.wifi;
-using Icu;
-using NDesk.DBus;
 
 namespace Bloom.Publish.BloomPub.wifi
 {
