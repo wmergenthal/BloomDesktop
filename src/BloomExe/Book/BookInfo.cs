@@ -1,3 +1,13 @@
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Diagnostics;
+using System.Drawing;
+using System.IO;
+using System.Linq;
+using System.Text.RegularExpressions;
+using System.Threading;
+using System.Windows.Forms;
 using Bloom.Api;
 using Bloom.Edit;
 using Bloom.Utils;
@@ -9,16 +19,6 @@ using SIL.IO;
 using SIL.Reporting;
 using SIL.Text;
 using SIL.Windows.Forms.ClearShare;
-using System;
-using System.Collections.Generic;
-using System.ComponentModel;
-using System.Diagnostics;
-using System.Drawing;
-using System.IO;
-using System.Linq;
-using System.Text.RegularExpressions;
-using System.Threading;
-using System.Windows.Forms;
 
 namespace Bloom.Book
 {
@@ -50,24 +50,26 @@ namespace Bloom.Book
             AppearanceSettings = new AppearanceSettings();
         }
 
-        internal BookInfo(string folderPath, bool isEditable)
+        internal BookInfo(string folderPath, bool isInEditableCollection)
             // By default (especially for many test cases), BookInfo's should assume savability
             // unless not editable
             : this(
                 folderPath,
-                isEditable,
-                isEditable ? new AlwaysEditSaveContext() : new NoEditSaveContext() as ISaveContext
+                isInEditableCollection,
+                isInEditableCollection
+                    ? new AlwaysEditSaveContext()
+                    : new NoEditSaveContext() as ISaveContext
             )
         {
-            // For real code, please explicitly provide a correct saveContext unless isEditable is false
-            if (isEditable)
+            // For real code, please explicitly provide a correct saveContext unless isInEditableCollection is false
+            if (isInEditableCollection)
                 Guard.Against(
                     !Program.RunningUnitTests,
                     "Only use this ctor for tests and non-editable collections"
                 );
         }
 
-        public BookInfo(string folderPath, bool isEditable, ISaveContext saveContext)
+        public BookInfo(string folderPath, bool isInEditableCollection, ISaveContext saveContext)
             : this()
         {
             Guard.AgainstNull(saveContext, "Please supply an actual saveContext");
@@ -75,7 +77,7 @@ namespace Bloom.Book
             _saveContext =
                 saveContext
                 ?? (
-                    isEditable
+                    isInEditableCollection
                         ? new AlwaysEditSaveContext()
                         : new NoEditSaveContext() as ISaveContext
                 );
@@ -86,7 +88,7 @@ namespace Bloom.Book
 
             UpdateFromDisk();
 
-            IsEditable = isEditable;
+            IsInEditableCollection = isInEditableCollection;
 
             FixDefaultsIfAppropriate();
         }
@@ -106,7 +108,7 @@ namespace Bloom.Book
             }
 
             PublishSettings = PublishSettings.FromFolder(FolderPath);
-            AppearanceSettings = AppearanceSettings.FromFolderOrNew(FolderPath);
+            AppearanceSettings.UpdateFromFolder(FolderPath);
         }
 
         public enum HowToPublishImageDescriptions
@@ -299,17 +301,17 @@ namespace Bloom.Book
         }
 
         /// <summary>
-        /// Determined at construction time, and really means whether it is part of the editable collection.
-        /// May not really be OK to edit, for example, if it isn't checked out.
-        /// Wants a better name; consider whether IsSaveable should be used instead.
+        /// Determined at construction time, tells whether the book is part of the editable collection.
+        /// This does not necessarily mean we can edit it, for example, it may not be checked out.
+        /// Often, IsSaveable is a better test.
         /// </summary>
-        public bool IsEditable { get; private set; }
+        public bool IsInEditableCollection { get; private set; }
 
         /// <summary>
         /// Determined by the SaveContext, which if relevant will consider team collection status.
         /// This determines whether changes to this book can currently be saved.
         /// </summary>
-        public bool IsSaveable => IsEditable && _saveContext.CanSaveChanges(this);
+        public bool IsSaveable => IsInEditableCollection && _saveContext.CanSaveChanges(this);
 
         /// <summary>
         /// If true, use a device-specific xmatter pack.
@@ -646,10 +648,7 @@ namespace Bloom.Book
         /// </summary>
         internal bool ShowThisBookAsSource()
         {
-            return !IsExperimental
-                || ExperimentalFeatures.IsFeatureEnabled(
-                    ExperimentalFeatures.kExperimentalSourceBooks
-                );
+            return MetaData.ShowThisBookAsSource();
         }
 
         private static bool TagIsTopic(string tag)
@@ -689,37 +688,54 @@ namespace Bloom.Book
         /// </summary>
         public static string InstallFreshInstanceGuid(string bookFolder)
         {
-            // This is a temporary BookInfo that shouldn't get asked about saveability of the book.
-            // But, this method should not have been called unless we already verified that we can save
-            // changes legitimately.
-            var bookInfo = new BookInfo(bookFolder, true, new AlwaysEditSaveContext());
-            return bookInfo.InstallFreshGuidInternal();
-        }
-
-        private string InstallFreshGuidInternal()
-        {
+            var metaData = BookMetaData.FromFolder(bookFolder) ?? new BookMetaData();
             var freshGuidString = Guid.NewGuid().ToString();
-            Id = freshGuidString;
-            try
-            {
-                Save();
-                RobustFile.Delete(BookOrderPath(FolderPath));
-                RobustFile.Delete(BookMetaData.BackupFilePath(FolderPath));
-            }
-            catch (UnauthorizedAccessException e)
-            {
-                // Don't display modal, always toast
-                NonFatalProblem.Report(
-                    ModalIf.None,
-                    PassiveIf.All,
-                    "Failed to repair duplicate id",
-                    "BookInfo.InstallFreshInstanceGuid() failed to repair duplicate id in locked meta.json file at "
-                        + FolderPath,
-                    e
-                );
-            }
+            metaData.Id = freshGuidString;
+            var count = 0;
 
-            return Id;
+            do
+            {
+                try
+                {
+                    metaData.WriteToFolder(bookFolder);
+                    RobustFile.Delete(BookOrderPath(bookFolder));
+                    RobustFile.Delete(BookMetaData.BackupFilePath(bookFolder));
+                    break;
+                }
+                catch (UnauthorizedAccessException e)
+                {
+                    // Don't display modal, always toast
+                    NonFatalProblem.Report(
+                        ModalIf.None,
+                        PassiveIf.All,
+                        "Failed to repair duplicate id",
+                        "BookInfo.InstallFreshInstanceGuid() failed to repair duplicate id in locked meta.json file at "
+                            + bookFolder,
+                        e
+                    );
+                    break; // retry is unlikely to help here, and we don't want repeated warning messages.
+                }
+                catch (IOException e)
+                {
+                    Thread.Sleep(500);
+                    count++;
+
+                    // stop trying after 5 attempts to save the file.
+                    if (count > 4)
+                    {
+                        Debug.Fail("Reproduction of BL-354 that we have taken steps to avoid");
+
+                        var msg = LocalizationManager.GetDynamicString(
+                            "Bloom",
+                            "BookEditor.ErrorSavingPage",
+                            "Bloom wasn't able to save the changes to the page."
+                        );
+                        ErrorReport.NotifyUserOfProblem(e, msg);
+                    }
+                }
+            } while (count < 5);
+
+            return freshGuidString;
         }
 
         /// <summary>
@@ -738,9 +754,7 @@ namespace Bloom.Book
             // meta.json file and the value is the filepath.
             var idToSortedFilepathsMap = new Dictionary<string, SortedList<DateTime, string>>();
             var currentFolder = pathToDirectory;
-
             GatherInstanceIdsRecursively(currentFolder, idToSortedFilepathsMap);
-
             // All the data is gathered, now to fix any problems. We assume that the first entry in the SortedList
             // is the original and we change the guid Id in all the copies.
             foreach (var kvp in idToSortedFilepathsMap)
@@ -819,8 +833,7 @@ namespace Bloom.Book
             }
             // Leaf node; we're in a book folder
             var metaFileLastWriteTime = RobustFile.GetLastWriteTimeUtc(metaJsonPath);
-            var bi = new BookInfo(currentFolder, false);
-            var id = bi.Id;
+            var id = (BookMetaData.FromFolder(currentFolder) ?? new BookMetaData()).Id;
             SafelyAddToIdSet(id, metaFileLastWriteTime, currentFolder, idToSortedFilepathsMap);
         }
 
@@ -841,7 +854,7 @@ namespace Bloom.Book
                 // behave as expected.
                 foreach (var lang in langs.Where((l) => l != "item"))
                     multiText[lang] = titles[lang].Trim();
-                return Book.GetBestTitleForDisplay(multiText, langCodes, IsEditable);
+                return Book.GetBestTitleForDisplay(multiText, langCodes, IsInEditableCollection);
             }
             catch (Exception e)
             {
@@ -1183,6 +1196,18 @@ namespace Bloom.Book
         //SeeAlso: commented IsExperimental on Book
         [JsonProperty("experimental")]
         public bool IsExperimental { get; set; }
+
+        /// <summary>
+        /// Check whether this book (or its pages) should be shown as a source.  If it is not experimental, the answer
+        /// is always "yes".  If it is experimental, then show it only if the user wants experimental sources.
+        /// </summary>
+        internal bool ShowThisBookAsSource()
+        {
+            return !IsExperimental
+                || ExperimentalFeatures.IsFeatureEnabled(
+                    ExperimentalFeatures.kExperimentalSourceBooks
+                );
+        }
 
         [JsonProperty("brandingProjectName")]
         public string BrandingProjectName { get; set; }

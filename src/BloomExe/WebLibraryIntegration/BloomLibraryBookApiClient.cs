@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
-using System.Text;
+using System.Threading;
 using System.Windows.Forms;
 using Bloom.Book;
 using Bloom.Properties;
@@ -47,8 +47,92 @@ namespace Bloom.WebLibraryIntegration
   ResponseStatus: {response.ResponseStatus}
   StatusDescription: {response.StatusDescription}
   ErrorMessage: {response.ErrorMessage}
-  ErrorException: {response.ErrorException}"
+  ErrorException: {response.ErrorException}
+  Headers:{response.Headers}"
             );
+        }
+
+        public dynamic CallLongRunningAction(
+            RestRequest request,
+            IProgress progress,
+            string messageToShowUserOnFailure,
+            string endpointForFailureLog
+        )
+        {
+            // Make the initial call. If all goes well, we get an Accepted (202) response with a URL to poll.
+            var response = AzureRestClient.Execute(request);
+            if (response.StatusCode != HttpStatusCode.Accepted)
+            {
+                LogApiError(endpointForFailureLog, response);
+                throw new ApplicationException(messageToShowUserOnFailure);
+            }
+
+            var operationLocation = response.Headers.FirstOrDefault(
+                h => h.Name == "Operation-Location"
+            );
+            if (operationLocation == null)
+            {
+                LogApiError(endpointForFailureLog, response);
+                throw new ApplicationException(messageToShowUserOnFailure);
+            }
+
+            // Poll the status URL until we get a terminal status
+            string status = null;
+            dynamic result = null;
+            var statusRequest = new RestRequest(operationLocation.Value.ToString(), Method.GET);
+            while (!progress.CancelRequested && !IsStatusTerminal(status))
+            {
+                response = AzureRestClient.Execute(statusRequest);
+                if (response.StatusCode != HttpStatusCode.OK)
+                {
+                    LogApiError(endpointForFailureLog, response);
+                    throw new ApplicationException(messageToShowUserOnFailure);
+                }
+
+                try
+                {
+                    dynamic responseContent = JObject.Parse(response.Content);
+                    status = responseContent.status;
+                    result = responseContent.result;
+                }
+                catch (Exception e)
+                {
+                    LogApiError(endpointForFailureLog, response);
+                    SIL.Reporting.Logger.WriteEvent("Failed to parse response content.");
+                    SIL.Reporting.Logger.WriteError(e);
+                    throw new ApplicationException(messageToShowUserOnFailure);
+                }
+
+                if (status == "Succeeded")
+                    return result;
+                else if (status == "Failed" || status == "Cancelled")
+                {
+                    LogApiError(endpointForFailureLog, response);
+                    throw new ApplicationException(messageToShowUserOnFailure);
+                }
+
+                int retryMilliseconds = 1000;
+                try
+                {
+                    var retryAfter = response.Headers.FirstOrDefault(h => h.Name == "Retry-After");
+                    if (retryAfter != null)
+                        retryMilliseconds = int.Parse(retryAfter.Value.ToString()) * 1000;
+                }
+                catch
+                {
+                    // Just use the default.
+                }
+
+                Thread.Sleep(retryMilliseconds);
+            }
+
+            return null;
+        }
+
+        private bool IsStatusTerminal(string status)
+        {
+            // See https://github.com/microsoft/api-guidelines/blob/vNext/azure/ConsiderationsForServiceDesign.md#long-running-operations
+            return new[] { "Succeeded", "Failed", "Canceled" }.Contains(status);
         }
 
         // This calls an azure function which does the following:
@@ -64,25 +148,26 @@ namespace Bloom.WebLibraryIntegration
             string transactionId,
             string storageKeyOfBookFolderParentOnS3,
             AmazonS3Credentials uploadCredentials
-        ) InitiateBookUpload(string existingBookObjectId = null)
+        ) InitiateBookUpload(IProgress progress, string existingBookObjectId = null)
         {
             if (!LoggedIn)
                 throw new ApplicationException("Must be logged in to upload a book");
 
-            var request = MakePostRequest("upload-start", 10); // 10-minute timeout; this does a lot of work on the server
+            var request = MakePostRequest("upload-start");
 
             if (!string.IsNullOrEmpty(existingBookObjectId))
                 request.AddQueryParameter("existing-book-object-id", existingBookObjectId);
 
-            var response = AzureRestClient.Execute(request);
+            var result = CallLongRunningAction(
+                request,
+                progress,
+                messageToShowUserOnFailure: "Unable to initiate book upload on the server.",
+                endpointForFailureLog: "upload-start"
+            );
 
-            if (response.StatusCode != HttpStatusCode.OK)
-            {
-                LogApiError("upload-start", response);
-                throw new ApplicationException("Unable to initiate book upload on the server.");
-            }
+            if (progress.CancelRequested)
+                return (null, null, null);
 
-            dynamic result = JObject.Parse(response.Content);
             return (
                 result["transaction-id"],
                 BloomS3Client.GetStorageKeyOfBookFolderParentFromUrl((string)result.url),
@@ -102,24 +187,23 @@ namespace Bloom.WebLibraryIntegration
         //  - Updates the `books` record in parse-server with all fields from the client,
         //     including the new baseUrl which points to the new S3 location. Sets uploadPendingTimestamp to null.
         //  - Deletes the book files from the old S3 location
-        public void FinishBookUpload(string transactionId, string metadataJson)
+        public void FinishBookUpload(IProgress progress, string transactionId, string metadataJson)
         {
             if (!LoggedIn)
                 throw new ApplicationException("Must be logged in to upload a book");
 
-            var request = MakePostRequest("upload-finish", 10); // 10-minute timeout; this does a lot of work on the server
+            var request = MakePostRequest("upload-finish");
 
             request.AddQueryParameter("transaction-id", transactionId);
 
             request.AddJsonBody(metadataJson);
 
-            var response = AzureRestClient.Execute(request);
-
-            if (response.StatusCode != HttpStatusCode.OK)
-            {
-                LogApiError("upload-finish", response);
-                throw new ApplicationException("Unable to finalize book upload on the server.");
-            }
+            CallLongRunningAction(
+                request,
+                progress,
+                messageToShowUserOnFailure: "Unable to finalize book upload on the server.",
+                endpointForFailureLog: "upload-finish"
+            );
         }
 
         protected RestClient AzureRestClient
@@ -139,14 +223,9 @@ namespace Bloom.WebLibraryIntegration
             return MakeRequest(action, Method.GET);
         }
 
-        private RestRequest MakePostRequest(string action, int timeoutInMinutes = 0)
+        private RestRequest MakePostRequest(string action)
         {
-            var request = MakeRequest(action, Method.POST);
-
-            if (timeoutInMinutes > 0)
-                request.Timeout = 1000 * 60 * timeoutInMinutes;
-
-            return request;
+            return MakeRequest(action, Method.POST);
         }
 
         private RestRequest MakeRequest(string action, Method requestType)
@@ -321,7 +400,7 @@ namespace Bloom.WebLibraryIntegration
 
         // Setting param 'includeLanguageInfo' to true adds a param to the query that causes it to fold in
         // useful language information instead of only having the arcane langPointers object.
-        public IRestResponse GetBookRecordsByQuery(string query, bool includeLanguageInfo)
+        private IRestResponse GetBookRecordsByQuery(string query, bool includeLanguageInfo)
         {
             var request = MakeParseGetRequest("classes/books");
             request.AddParameter("where", query, ParameterType.QueryString);
@@ -332,6 +411,7 @@ namespace Bloom.WebLibraryIntegration
             return ParseRestClient.Execute(request);
         }
 
+        // Will throw an exception if there is any reason we can't make a successful query, including if there is no internet.
         public dynamic GetSingleBookRecord(string id, bool includeLanguageInfo = false)
         {
             var json = GetBookRecords(id, includeLanguageInfo);
@@ -355,14 +435,28 @@ namespace Bloom.WebLibraryIntegration
             }
         }
 
+        // Query parse for books.
+        // Will throw an exception if there is any reason we can't make a successful query, including if there is no internet.
         public dynamic GetBookRecords(
             string bookInstanceId,
             bool includeLanguageInfo,
             bool includeBooksFromOtherUploaders = false
         )
         {
+            // For current usage of this method, we really need to know the difference between "no books found" and "we couldn't check".
+            // So all paths which don't allow us to check need to throw.
+            // Note that all this gets completely reworked in 5.7, so we don't have to live with this very long.
+
             if (!UrlLookup.CheckGeneralInternetAvailability(false))
-                return null;
+            {
+                SIL.Reporting.Logger.WriteEvent(
+                    "Internet was unavailable when trying to get book records."
+                );
+                throw new ApplicationException(
+                    "Unable to look up book records because there is no internet connection."
+                );
+            }
+
             var query = "{\"bookInstanceId\":\"" + bookInstanceId + "\"";
             if (!includeBooksFromOtherUploaders)
             {
@@ -371,10 +465,26 @@ namespace Bloom.WebLibraryIntegration
             query += "}";
             var response = GetBookRecordsByQuery(query, includeLanguageInfo);
             if (response.StatusCode != HttpStatusCode.OK)
-                return null;
+            {
+                SIL.Reporting.Logger.WriteEvent(
+                    $"Unable to query book records on parse.\n"
+                        + $"query = {query}\n"
+                        + $"response.StatusCode = {response.StatusCode}\n"
+                        + $"response.Content = {response.Content}"
+                );
+                throw new ApplicationException("Unable to look up book records.");
+            }
+
             dynamic json = JObject.Parse(response.Content);
             if (json == null)
-                return null;
+            {
+                SIL.Reporting.Logger.WriteEvent(
+                    $"Unable to parse book records query result.\n"
+                        + $"response.Content = {response.Content}"
+                );
+                throw new ApplicationException("Unable to look up book records.");
+            }
+
             return json.results;
         }
 

@@ -9,13 +9,13 @@ using System.Xml.Linq;
 using Bloom;
 using Bloom.Book;
 using Bloom.Publish;
-using BloomBook = Bloom.Book.Book;
 using Bloom.Publish.Epub;
 using Bloom.web.controllers;
 using ICSharpCode.SharpZipLib.Zip;
 using NUnit.Framework;
 using SIL.Extensions;
 using SIL.PlatformUtilities;
+using BloomBook = Bloom.Book.Book;
 
 namespace BloomTests.Publish
 {
@@ -247,8 +247,8 @@ namespace BloomTests.Publish
                 branding: "Test"
             );
             // MakeEpub (when using a physical file as we are) creates Device Xmatter, so usually page one is cover, page 2 is ours.
-            // But the added front cover is empty so it gets deleted. So page 1 is the one we're testing.
-            var assertThatPageOneData = AssertThatXmlIn.String(GetPageNData(1));
+            // If we go to default theme, the cover will be empty and get deleted, and we'll need to test page 1.
+            var assertThatPageOneData = AssertThatXmlIn.String(GetPageNData(2));
             assertThatPageOneData.HasNoMatchForXpath(
                 "//xhtml:div[contains(@class,'bloom-imageDescription')]",
                 _ns
@@ -603,7 +603,7 @@ namespace BloomTests.Publish
                         CheckPageBreakMarker(currentPage, "pgCreditsPage", "Credits Page");
                         break;
                     case 5:
-                        CheckPageBreakMarker(currentPage, "pgTheEnd", "The End");
+                        CheckPageBreakMarker(currentPage, "pgOutsideBackCover", "Outside Back Cover");
                         CheckEpubTypeAttributes(currentPage, null);
                         break;
                     default:
@@ -620,7 +620,10 @@ namespace BloomTests.Publish
             Assert.AreEqual(5, pageCount);
             AssertThatXmlIn
                 .String(currentPage)
-                .HasSpecifiedNumberOfMatchesForXpath("//div[contains(@class, 'theEndPage')]", 1);
+                .HasSpecifiedNumberOfMatchesForXpath("//div[contains(@class, 'outsideBackCover')]", 1);
+            AssertThatXmlIn
+                .String(currentPage)
+                .HasSpecifiedNumberOfMatchesForXpath("//div[contains(@class, 'theEndPage')]", 0);
             var navPageData = CheckNavPage();
             AssertThatXmlIn
                 .String(navPageData)
@@ -687,7 +690,7 @@ namespace BloomTests.Publish
             AssertThatXmlIn
                 .String(navPageData)
                 .HasSpecifiedNumberOfMatchesForXpath(
-                    "xhtml:html/xhtml:body/xhtml:nav[@epub:type='page-list']/xhtml:ol/xhtml:li/xhtml:a[@href='5.xhtml#pgTheEnd']",
+                    "xhtml:html/xhtml:body/xhtml:nav[@epub:type='page-list']/xhtml:ol/xhtml:li/xhtml:a[@href='5.xhtml#pgOutsideBackCover']",
                     _ns,
                     1
                 );
@@ -1164,7 +1167,8 @@ namespace BloomTests.Publish
 							</div>
 						</div>
 					</div>",
-                defaultLanguages: "V"
+                defaultLanguages: "V",
+                createPhysicalFile: true
             );
 
             MakeEpub("output", "InvisibleAndUnwantedContentRemoved", book);
@@ -1200,15 +1204,17 @@ namespace BloomTests.Publish
                 "English text (first national language) should display in title.",
                 "en",
                 extraPageClass: " bloom-frontMatter frontCover' data-page='required singleton",
-                extraContent: @"<div class='bloom-editable' lang='xyz'><label class='bubble'>Book title in {lang} should be removed</label>vernacular text (content1) should always display</div>
-							<div class='bloom-editable' lang='fr'>French text (second national language) should not display</div>
-							<div class='bloom-editable' lang='de'>German should never display in this collection</div>",
+                extraContent: @"<div class='bloom-editable' lang='xyz' data-book='bookTitle'><label class='bubble'>Book title in {lang} should be removed</label>vernacular text (content1) should always display</div>
+							<div class='bloom-editable' lang='fr' data-book='bookTitle'>French text (second national language) should not display</div>
+							<div class='bloom-editable' lang='de' data-book='bookTitle'>German should never display in this collection</div>",
                 optionalDataDiv: @"<div id='bloomDataDiv'>
 						<div data-book='contentLanguage1' lang='*'>xyz</div>
 						<div data-book='contentLanguage2' lang='*'>en</div>
 					</div>",
                 extraEditGroupClasses: "bookTitle",
-                defaultLanguages: "V,N1"
+                defaultLanguages: "V,N1",
+                // This test needs real stylesheets to determine what should be visible.
+                createPhysicalFile: true
             );
 
             MakeEpub("output", "National1_InXMatter_IsNotRemoved", book);
@@ -1333,7 +1339,8 @@ namespace BloomTests.Publish
                 extraContent: @"<div class='bloom-editable' lang='xyz'>vernacular text should not display in this case because the user turned it off</div>
 							<div class='bloom-editable' lang='fr'>French text (second national language) should not display</div>
 							<div class='bloom-editable' lang='de'>German should never display in this collection</div>",
-                defaultLanguages: "N1"
+                defaultLanguages: "N1",
+                createPhysicalFile: true
             );
 
             MakeEpub("output", "UserSpecifiedNoVernacular_VernacularRemoved", book);
@@ -1374,7 +1381,8 @@ namespace BloomTests.Publish
 						<div data-book=""originalAcknowledgments"" lang=""en""><p>English Acknowledgments</p></div>
 					</div>",
                 extraEditGroupClasses: "originalAcknowledgments",
-                defaultLanguages: "N1"
+                defaultLanguages: "N1",
+                createPhysicalFile: true
             );
 
             MakeEpub(
@@ -1465,7 +1473,8 @@ namespace BloomTests.Publish
 						<div data-book=""licenseUrl"" lang=""*"">http://creativecommons.org/licenses/by/4.0/</div>
 						<div data-book=""licenseDescription"" lang=""en"">http://creativecommons.org/licenses/by/4.0/<br></br>You are free to make commercial use of this work. You may adapt and add to this work. You must keep the copyright and credits for authors, illustrators, etc.</div>
 						<div data-book=""licenseImage"" lang=""*"">license.png</div>
-					</div>"
+					</div>",
+                createPhysicalFile: true
             );
             MakeImageFiles(book, "license");
 

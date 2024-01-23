@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Web;
 using System.Xml;
@@ -699,6 +699,62 @@ namespace BloomTests.Book
         }
 
         [Test]
+        public void CreateBookOnDiskFromTemplate_NoPossiblyConflictingCss_MigratesToTheme()
+        {
+            _starter.TestingSoSkipAddingXMatter = true;
+            var body =
+                @"<div class='bloom-page'>
+						<div class='bloom-translationGroup'>
+						 <div lang='en'>This is some English</div>
+						</div>
+					</div>";
+            string sourceTemplateFolder = GetShellBookFolder(body, null);
+            var path = GetPathToHtml(
+                _starter.CreateBookOnDiskFromTemplate(sourceTemplateFolder, _projectFolder.Path)
+            );
+            //nb: testid is used rather than id because id is replaced with a guid when the copy is made
+
+            var bookFolder = Path.GetDirectoryName(path);
+            var appearanceSettings = new AppearanceSettings();
+            appearanceSettings.UpdateFromFolder(bookFolder);
+            Assert.That(appearanceSettings.CssThemeName == "default");
+
+            // Would like to test this, but we don't update the stylesheets in the DOM until we actually create the book.
+            //AssertThatXmlIn.HtmlFile(path).HasSpecifiedNumberOfMatchesForXpath("//link[@href='basePage.css']", 1);
+            //AssertThatXmlIn.HtmlFile(path).HasSpecifiedNumberOfMatchesForXpath("//link[@href='appearance.css']", 1);
+        }
+
+        [Test]
+        public void CreateBookOnDiskFromTemplate_ConflictingCss_UsesLegacy()
+        {
+            _starter.TestingSoSkipAddingXMatter = true;
+            var body =
+                @"<div class='bloom-page'>
+						<div class='bloom-translationGroup'>
+						 <div lang='en'>This is some English</div>
+						</div>
+					</div>";
+            string sourceTemplateFolder = GetShellBookFolder(body, null);
+            File.WriteAllText(
+                Path.Combine(sourceTemplateFolder, "customBookStyles.css"),
+                @".marginBox {margin: 20px}"
+            );
+            var path = GetPathToHtml(
+                _starter.CreateBookOnDiskFromTemplate(sourceTemplateFolder, _projectFolder.Path)
+            );
+            //nb: testid is used rather than id because id is replaced with a guid when the copy is made
+
+            var bookFolder = Path.GetDirectoryName(path);
+            var appearanceSettings = new AppearanceSettings();
+            appearanceSettings.UpdateFromFolder(bookFolder);
+            Assert.That(appearanceSettings.CssThemeName == "legacy-5-6");
+
+            // Would like to test this, but we don't update the stylesheets in the DOM until we actually create the book.
+            //AssertThatXmlIn.HtmlFile(path).HasSpecifiedNumberOfMatchesForXpath("//link[@href='basePage.css']", 1);
+            //AssertThatXmlIn.HtmlFile(path).HasSpecifiedNumberOfMatchesForXpath("//link[@href='appearance.css']", 1);
+        }
+
+        [Test]
         public void CreateBookOnDiskFromTemplate_UnwantedFiles_AreNotCopied()
         {
             _starter.TestingSoSkipAddingXMatter = true;
@@ -937,7 +993,7 @@ namespace BloomTests.Book
                 .HtmlFile(path)
                 .HasSpecifiedNumberOfMatchesForXpath(
                     "//div[@testid='pageWithNoLanguageTags']/p/textarea",
-                    2
+                    3
                 );
             AssertThatXmlIn
                 .HtmlFile(path)
@@ -1496,7 +1552,7 @@ namespace BloomTests.Book
                 .HasSpecifiedNumberOfMatchesForXpath("//div[@data-book='foo']/div[@lang='fr']", 1);
             AssertThatXmlIn
                 .Dom(dom)
-                .HasSpecifiedNumberOfMatchesForXpath("//div[@data-book='foo']/div[@lang='es']", 0);
+                .HasSpecifiedNumberOfMatchesForXpath("//div[@data-book='foo']/div[@lang='es']", 1);
             AssertThatXmlIn
                 .Dom(dom)
                 .HasSpecifiedNumberOfMatchesForXpath("//div[@data-book='foo']/div[@lang='xyz']", 1);

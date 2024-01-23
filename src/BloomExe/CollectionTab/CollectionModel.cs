@@ -99,24 +99,6 @@ namespace Bloom.CollectionTab
             }
         }
 
-        public bool CanExportSelection
-        {
-            get
-            {
-                return _bookSelection.CurrentSelection != null
-                    && _bookSelection.CurrentSelection.CanExport;
-            }
-        }
-
-        public bool CanUpdateSelection
-        {
-            get
-            {
-                return _bookSelection.CurrentSelection != null
-                    && _bookSelection.CurrentSelection.CanUpdate;
-            }
-        }
-
         internal CollectionSettings CollectionSettings
         {
             get { return _collectionSettings; }
@@ -866,8 +848,9 @@ namespace Bloom.CollectionTab
                 );
                 // Since the user told us to do it, we'll do it even to books that we think are already
                 // up to date. (EnsureUpToDate would do so anyway, since these are newly created Book objects, even if they are
-                // for books we already have in memory.)
-                book.BringBookUpToDate(progress);
+                // for books we already have in memory.) But not to ones where saving is disabled (in a TC).
+                if (book.IsSaveable)
+                    book.BringBookUpToDate(progress);
             }
         }
 
@@ -981,7 +964,7 @@ namespace Bloom.CollectionTab
                     _bookSelection.SelectBook(newBook, aboutToEdit: true);
                 }
                 //enhance: would be nice to know if this is a new shell
-                if (sourceBook.IsShellOrTemplate)
+                if (!sourceBook.IsInEditableCollection)
                 {
                     Analytics.Track(
                         "Create Book",
@@ -1004,6 +987,16 @@ namespace Bloom.CollectionTab
                     "Bloom ran into an error while creating that book. (Sorry!)"
                 );
             }
+        }
+
+        public BookInfo GetBookInfoByFolderPath(string path)
+        {
+            var collectionPath = Path.GetDirectoryName(path);
+            var collection = GetBookCollections()
+                .FirstOrDefault(c => c.PathToDirectory == collectionPath);
+            if (collection == null)
+                return null;
+            return collection.GetBookInfoByFolderPath(path);
         }
 
         public Book.Book GetBookFromBookInfo(BookInfo bookInfo, bool fullyUpdateBookFiles = false)

@@ -167,7 +167,9 @@ export const LibraryPublishSteps: React.FunctionComponent = () => {
     }, [summary]); // purposefully not including bookInfo, so we don't post on initial load
 
     function isReadyForAgreements(): boolean {
-        return !!bookInfo?.copyright && !!bookInfo?.isTitleOKToPublish;
+        return (
+            !!bookInfo?.title && (!!bookInfo?.copyright || bookInfo?.isTemplate)
+        );
     }
     const [agreedPreviously, setAgreedPreviously] = useState<boolean>(false);
     const [agreementsAccepted, setAgreementsAccepted] = useState<boolean>(
@@ -222,6 +224,10 @@ export const LibraryPublishSteps: React.FunctionComponent = () => {
         setIsUploadComplete(false);
         setIsUploading(true);
         get("libraryPublish/getUploadCollisionInfo", result => {
+            if (result.data.error) {
+                // The API already sent an error message
+                return;
+            }
             if (result.data.shouldShow) {
                 setUploadCollisionInfo(result.data);
                 showUploadCollisionDialog();

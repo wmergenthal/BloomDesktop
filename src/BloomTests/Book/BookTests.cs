@@ -1,13 +1,18 @@
+using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Imaging;
+using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Web;
 using System.Xml;
 using Bloom;
 using Bloom.Book;
 using Bloom.Collection;
 using Bloom.Publish;
 using Bloom.web.controllers;
+using BloomTemp;
 using Moq;
 using NUnit.Framework;
 using SIL.Extensions;
@@ -15,11 +20,6 @@ using SIL.IO;
 using SIL.Progress;
 using SIL.Windows.Forms.ClearShare;
 using SIL.Xml;
-using System;
-using System.Collections.Generic;
-using System.Globalization;
-using System.Web;
-using BloomTemp;
 
 namespace BloomTests.Book
 {
@@ -226,7 +226,8 @@ namespace BloomTests.Book
             var dataBookImage = dom.SelectSingleNodeHonoringDefaultNS(
                 "//div[@id='bloomDataDiv']/div[@data-book='coverImage']"
             );
-            Assert.AreEqual(placeHolderFile, dataBookImage.InnerText);
+            if (dataBookImage != null) // used to just set the src of the img, but removing the dataDiv element altogether is better still.
+                Assert.AreEqual(placeHolderFile, dataBookImage.InnerText);
             var pageImage = dom.SelectSingleNodeHonoringDefaultNS(
                 "//div[contains(@class,'bloom-imageContainer')]/img[@data-book='coverImage']"
             );
@@ -6393,5 +6394,55 @@ namespace BloomTests.Book
 
             Assert.That(result, Is.EqualTo("Enter Shift-Enter Last Line "));
         }
+
+		[Test]
+		public void ElementIsInXMatter_AncestorHasBloomFrontMatter_ReturnsTrue()
+		{
+			XmlDocument doc = new XmlDocument();
+			XmlElement body = doc.CreateElement("body");
+			XmlElement xmatterDiv = doc.CreateElement("div");
+			xmatterDiv.SetAttribute("class", "bloom-frontMatter");
+			body.AppendChild(xmatterDiv);
+			XmlElement parentDiv = doc.CreateElement("div");
+			xmatterDiv.AppendChild(parentDiv);
+			XmlElement div = doc.CreateElement("div");
+			parentDiv.AppendChild(div);
+
+			Assert.That(Bloom.Book.Book.ElementIsInXMatter(div), Is.True);
+
+			XmlElement innerDiv = doc.CreateElement("div");
+			div.AppendChild(innerDiv);
+
+			Assert.That(Bloom.Book.Book.ElementIsInXMatter(innerDiv), Is.True);
+		}
+
+		[Test]
+		public void ElementIsInXMatter_NoAncestorHasBloomFrontMatter_ReturnsFalse()
+		{
+			XmlDocument doc = new XmlDocument();
+			XmlElement body = doc.CreateElement("body");
+			XmlElement nonXmatterDiv = doc.CreateElement("div");
+			body.AppendChild(nonXmatterDiv);
+			XmlElement parentDiv = doc.CreateElement("div");
+			nonXmatterDiv.AppendChild(parentDiv);
+			XmlElement div = doc.CreateElement("div");
+			parentDiv.AppendChild(div);
+
+			Assert.That(Bloom.Book.Book.ElementIsInXMatter(div), Is.False);
+
+			XmlElement innerDiv = doc.CreateElement("div");
+			div.AppendChild(innerDiv);
+
+			Assert.That(Bloom.Book.Book.ElementIsInXMatter(innerDiv), Is.False);
+		}
+
+		[Test]
+		public void ElementIsInXMatter_ElementIsBody_ReturnsFalse()
+		{
+			XmlDocument doc = new XmlDocument();
+			XmlElement body = doc.CreateElement("body");
+
+			Assert.That(Bloom.Book.Book.ElementIsInXMatter(body), Is.False);
+		}
     }
 }

@@ -3,20 +3,20 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
-using Bloom.Book;
 using System.Windows.Forms;
 using System.Xml;
 using Bloom.Api;
-using SIL.Reporting;
-using SIL.Xml;
+using Bloom.Book;
+using Bloom.FontProcessing;
 using Bloom.Publish.Epub;
 using Bloom.web;
 using Bloom.web.controllers;
+using Bloom.Workspace;
 using L10NSharp;
 using SIL.IO;
 using SIL.Progress;
-using Bloom.FontProcessing;
-using Bloom.Workspace;
+using SIL.Reporting;
+using SIL.Xml;
 
 namespace Bloom.Publish
 {
@@ -308,7 +308,10 @@ namespace Bloom.Publish
             // BloomReader will obey rules like display:none.
             // For epubs, we don't; display:none is not reliably obeyed, so the reader could see
             // unexpected things.
-
+            // We make this displayDom because, at least in the case of flowable epubs,
+            // the very simplified stylesheet in use in the epub dom doesn't hide anything, so we
+            // need to use the real DOM with its stylesheets to figure out what is hidden there
+            // and should be removed in the epub.
             HtmlDom displayDom = null;
             foreach (XmlElement page in pageElts)
             {
@@ -316,6 +319,7 @@ namespace Bloom.Publish
                 if (displayDom == null)
                 {
                     displayDom = book.GetHtmlDomWithJustOnePage(page);
+                    displayDom.BaseForRelativePaths = book.FolderPath;
                 }
                 else
                 {
@@ -622,12 +626,29 @@ namespace Bloom.Publish
                 WantMusic = true
             };
             filter.CopyBookFolderFiltered(tempFolderPath);
+            var collectionStylesSource = Path.Combine(
+                Path.GetDirectoryName(bookFolderPath),
+                "customCollectionStyles.css"
+            );
+            var collectionStylesDest = Path.Combine(tempFolderPath, "customCollectionStyles.css");
+            if (RobustFile.Exists(collectionStylesSource))
+            {
+                RobustFile.Copy(collectionStylesSource, collectionStylesDest, true);
+            }
+            else
+            {
+                RobustFile.Delete(collectionStylesDest);
+            }
             // We can always save in a temp book
             var bookInfo = new BookInfo(tempFolderPath, true, new AlwaysEditSaveContext())
             {
                 UseDeviceXMatter = !isTemplateBook
             };
+
             var modifiedBook = bookServer.GetBookFromBookInfo(bookInfo);
+            // This book has to stand alone. If it needs a customCollectionStyles.css, it will have to use the one we just
+            // copied into the actual book folder, not one in a parent folder.
+            modifiedBook.Storage.LinkToLocalCollectionStyles = true;
             modifiedBook.WriteFontFaces = wantFontFaceDeclarations;
             modifiedBook.BringBookUpToDate(new NullProgress(), true);
             modifiedBook.RemoveNonPublishablePages(omittedPageLabels);

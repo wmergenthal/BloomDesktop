@@ -4,21 +4,21 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Text;
 using System.Windows.Forms;
+using System.Xml;
 using Amazon.Runtime;
 using Amazon.S3;
 using Bloom.Book;
 using Bloom.Collection;
 using Bloom.Publish;
+using Bloom.web;
 using DesktopAnalytics;
 using L10NSharp;
 using SIL.Extensions;
 using SIL.IO;
 using SIL.Progress;
 using SIL.Reporting;
-using System.Xml;
-using System.Text;
-using Bloom.web;
 
 namespace Bloom.WebLibraryIntegration
 {
@@ -272,7 +272,10 @@ namespace Bloom.WebLibraryIntegration
                     // The server will create a new folder for our upload or sync. If the book already exists, the new folder gets prepopulated with the existing files.
                     // (after we are done, the server handles making the new folder the current one)
                     (var transactionId, _storageKeyOfBookFolderParentOnS3, var s3Credentials) =
-                        BloomLibraryBookApiClient.InitiateBookUpload(existingBookObjectIdOrNull);
+                        BloomLibraryBookApiClient.InitiateBookUpload(
+                            progress,
+                            existingBookObjectIdOrNull
+                        );
 
 #if DEBUG
                     // S3 URL can be reasonably deduced, as long as we have the S3 ID, so print that out in Debug mode.
@@ -299,6 +302,7 @@ namespace Bloom.WebLibraryIntegration
                         audioLanguages,
                         metadataLang1Code,
                         metadataLang2Code,
+                        existingBookObjectIdOrNull == null,
                         collectionSettings?.SettingsFilePath,
                         isForBulkUpload
                     );
@@ -310,7 +314,12 @@ namespace Bloom.WebLibraryIntegration
                         return "";
 
                     // Inform the server we have completed the upload. It will update baseUrl to point to the new files and delete the old ones.
-                    BloomLibraryBookApiClient.FinishBookUpload(transactionId, metadata.WebDataJson);
+                    BloomLibraryBookApiClient.FinishBookUpload(
+                        progress,
+                        transactionId,
+                        metadata.WebDataJson
+                    );
+
                     bookObjectId = transactionId;
 
                     //   if (!UseSandbox) // don't make it seem like there are more uploads than their really are if this a tester pushing to the sandbox

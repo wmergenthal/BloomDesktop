@@ -685,6 +685,13 @@ namespace Bloom.Book
             return !stylesheetsToIgnoreAdding.Contains(path);
         }
 
+        /// <summary>
+        /// We're trying to get names of style sheets that need to be copied from one book to another.
+        /// So not the standard ones that every book has, but things like one specific to the particular
+        /// template the source was made from, or that got added becuase we used an Activity page that
+        /// has an associated one.
+        /// </summary>
+        /// <returns></returns>
         public virtual IEnumerable<string> GetTemplateStyleSheets()
         {
             var stylesheetsToIgnore = new List<string>();
@@ -915,6 +922,17 @@ namespace Bloom.Book
             else
             {
                 newPage.SetAttribute("data-page", dataPageValue); //the template has these as data-page='extra'
+            }
+
+            // Preserve the data-page-number attribute of the old page, which might be empty or missing.  (BL-12903)
+            var dataPageNumber = page.GetAttribute("data-page-number");
+            if (String.IsNullOrEmpty(dataPageNumber))
+            {
+                newPage.RemoveAttribute("data-page-number");
+            }
+            else
+            {
+                newPage.SetAttribute("data-page-number", dataPageNumber);
             }
 
             // preserve the 'side' setting of the old page
