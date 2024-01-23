@@ -1,10 +1,13 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading;
 using Bloom.Publish.BloomPUB.wifi;
+using Icu;
+using NDesk.DBus;
 
 namespace Bloom.Publish.BloomPub.wifi
 {
@@ -47,35 +50,36 @@ namespace Bloom.Publish.BloomPub.wifi
         /// </summary>
         public void ListenForTCPMessages()
         {
-            // Establish the local endpoint for the socket.
-            //
-            // Question: should some of this stuff be in a try/catch?
-            string hostName = Dns.GetHostName();  // get name of host running this app
-            Debug.WriteLine("WM, TCP-listener, hostname = " + hostName);
-
-            //string ip = Dns.GetHostByName(hostName).AddressList[0].ToString(); -- deprecated per VS 2022,
-            // replace per https://www.tutorialspoint.com/How-to-display-the-IP-Address-of-the-Machine-using-Chash
-            // to list ALL a host's addresses:
-            IPHostEntry myHost = Dns.GetHostEntry(hostName);
-            IPAddress[] myIpAddresses = myHost.AddressList;
-
-            // For debug only.
-            Debug.WriteLine("WM, TCP-listener, IP address list:");
-            for (int i = 0; i < myIpAddresses.Length; i++) {
-                Debug.WriteLine("   IP address[" + i + "] = " + myIpAddresses[i].ToString());
+            // Creating local endpoint requires the IP address of *this* (the local) machine.
+            // Since a machine running BloomDesktop can have multiple IP addresses (mine has 9,
+            // a mix of both IPv4 and IPv6), we must be judicious in selecting the one that will
+            // actually get used by Desktop. A post at
+            // https://stackoverflow.com/questions/6803073/get-local-ip-address/27376368#27376368
+            // shows a way to do that:
+            //   "Connect a UDP socket and read its local endpoint.
+            //    Connect on a UDP socket has the following effect: it sets the destination for
+            //    Send/Recv, discards all packets from other addresses, and - which is what we use -
+            //    transfers the socket into "connected" state, settings its appropriate fields. This
+            //    includes checking the existence of the route to the destination according to the
+            //    system's routing table and setting the local endpoint accordingly. The last part
+            //    seems to be undocumented officially but it looks like an integral trait of Berkeley
+            //    sockets API (a side effect of UDP "connected" state) that works reliably in both
+            //    Windows and Linux across versions and distributions.
+            //    So, this method will give the local address that would be used to connect to the
+            //    specified remote host.There is no real connection established, hence the specified
+            //    remote ip can be unreachable."
+            IPEndPoint endpoint;
+            using (Socket socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, 0))
+            {
+                socket.Connect("8.8.8.8", 65530);  // Google's public DNS service
+                endpoint = socket.LocalEndPoint as IPEndPoint;
+                Debug.WriteLine("WM, TCP-listener, IPv4 address = " + endpoint.Address.ToString()); // WM, temporary
             }
 
-            // On the Lenovo T480s, addresses [0]-[5] are IPv6. I want to use ethernet
-            // interface's IPv4 address, which happens to be [6] (refer to the generated
-            // console output).
-            // Yes, of course a hardcoded index like this is not acceptable for real code.
-            // Will implement something better.
-            IPAddress ipAddr = myHost.AddressList[6];
-
-            // Create the endpoint and socket.
-            Debug.WriteLine("WM, TCP-listener, creating listener on " + myIpAddresses[6]); // WM, temporary
-            IPEndPoint localEndPoint = new IPEndPoint(ipAddr, _portToListen);
-            Socket listener = new Socket(ipAddr.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
+            // Now can create the local endpoint and socket, using the tested IP address.
+            Debug.WriteLine("WM, TCP-listener, creating listener on " + endpoint.Address.ToString()); // WM, temporary
+            IPEndPoint localEndPoint = new IPEndPoint(endpoint.Address, _portToListen);
+            Socket listener = new Socket(endpoint.Address.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
 
             try
             {
@@ -94,7 +98,7 @@ namespace Bloom.Publish.BloomPub.wifi
                 {
                     Debug.WriteLine("WM, TCP-listener, waiting for connection..."); // WM, temporary
 
-                    // Create socket for newly created connection. Bind() and Listen()
+                    // Create socket for new connection. Bind() and Listen()
                     // must have previously been called. This is a blocking call.
                     Socket clientSocket = listener.Accept();
 
@@ -105,8 +109,7 @@ namespace Bloom.Publish.BloomPub.wifi
                     // Receive incoming message. 'inLen' tells how long it is.
                     int inLen = clientSocket.Receive(inBuf);
 
-                    // For debug only: convert incoming raw bytes to ASCII.
-                    //string inBufString = Encoding.ASCII.GetString(inBuf, 0, inLen);
+                    // Debug only: convert incoming raw bytes to ASCII.
                     var inBufString = Encoding.ASCII.GetString(inBuf, 0, inLen);
 
                     // Raise event for WiFiPublisher to notice and act on -- this is what
@@ -116,7 +119,7 @@ namespace Bloom.Publish.BloomPub.wifi
 
                     // Debug only: show the request from Reader (which is 'inLen' bytes long).
                     Debug.WriteLine("WM, TCP-listener, message {0} from Reader:", incomingMsgId++);
-                    Debug.WriteLine("   msg=" + inBufString.Substring(0, inLen));
+                    Debug.WriteLine("   msg = " + inBufString.Substring(0, inLen));
 
                     // Close connection (actual book transfer is done elsewhere, by SyncServer).
                     clientSocket.Shutdown(SocketShutdown.Both);

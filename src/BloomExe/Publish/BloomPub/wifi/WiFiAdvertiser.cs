@@ -139,6 +139,12 @@ namespace Bloom.Publish.BloomPub.wifi
         /// This is ambiguous if the computer has more than one IP address (typically for an Ethernet and WiFi adapter).
         /// Early experiments indicate that things work whichever one is used, assuming the networks are connected.
         /// Eventually we may want to prefer WiFi if available (see code in HearThis), or even broadcast on all of them.
+        ///
+        /// See https://stackoverflow.com/questions/6803073/get-local-ip-address/27376368#27376368 for a way
+        /// to determine which of potentially multiple IP addresses will be the one used. The technique is used
+        /// successfully in BloomReaderTCPListener::ListenForTCPMessages(), whose development was done with a
+        /// laptop that had 9 IP addresses (comprising a mix of IPv4 and IPv6). In that development the function
+        /// below always returned an address different from the one actually being used.
         /// </summary>
         /// <returns></returns>
         private string GetLocalIpAddress()
