@@ -7,7 +7,7 @@ using System.Text;
 using System.Threading;
 using Bloom.Api;
 using Bloom.web;
-using SIL.Progress;
+//using SIL.Progress;
 
 namespace Bloom.Publish.BloomPub.wifi
 {
@@ -60,6 +60,7 @@ namespace Bloom.Publish.BloomPub.wifi
             _client = new UdpClient { EnableBroadcast = true };
             _endPoint = new IPEndPoint(IPAddress.Parse("255.255.255.255"), Port);
             _thread = new Thread(Work);
+            Debug.WriteLine("WM, WiFiAdvertiser::Start, work thread start"); // WM, temporary
             _thread.Start();
         }
 
@@ -71,6 +72,7 @@ namespace Bloom.Publish.BloomPub.wifi
                 idSuffix: "beginAdvertising",
                 message: "Advertising book to Bloom Readers on local network..."
             );
+            Debug.WriteLine("WM, WiFiAdvertiser::Work, begin UDP advertising loop"); // WM, temporary
             try
             {
                 while (true)
@@ -78,6 +80,7 @@ namespace Bloom.Publish.BloomPub.wifi
                     if (!Paused)
                     {
                         UpdateAdvertisementBasedOnCurrentIpAddress();
+                        Debug.WriteLine("WM, WiFiAdvertiser::Work, sending"); // WM, temporary
                         _client.BeginSend(
                             _sendBytes,
                             _sendBytes.Length,
@@ -86,12 +89,14 @@ namespace Bloom.Publish.BloomPub.wifi
                             _client
                         );
                     }
+                    Debug.WriteLine("WM, WiFiAdvertiser::Work, 1-second sleep"); // WM, temporary
                     Thread.Sleep(1000);
                 }
             }
             catch (ThreadAbortException)
             {
                 _progress.Message(idSuffix: "Stopped", message: "Stopped Advertising.");
+                Debug.WriteLine("WM, WiFiAdvertiser::Work, shutting down client"); // WM, temporary
                 _client.Close();
             }
             catch (Exception error)
@@ -112,9 +117,11 @@ namespace Bloom.Publish.BloomPub.wifi
         /// </summary>
         private void UpdateAdvertisementBasedOnCurrentIpAddress()
         {
+            //Debug.WriteLine("WM, WiFiAdvertiser::UABOCIA, begin, _currentIpAddress = " + _currentIpAddress); // WM, temporary
             if (_currentIpAddress != GetLocalIpAddress())
             {
                 _currentIpAddress = GetLocalIpAddress();
+                //Debug.WriteLine("WM, WiFiAdvertiser::UABOCIA, updated, _currentIpAddress = " + _currentIpAddress); // WM, temporary
                 dynamic advertisement = new DynamicJson();
                 advertisement.title = BookTitle;
                 advertisement.version = BookVersion;
@@ -132,6 +139,12 @@ namespace Bloom.Publish.BloomPub.wifi
         /// This is ambiguous if the computer has more than one IP address (typically for an Ethernet and WiFi adapter).
         /// Early experiments indicate that things work whichever one is used, assuming the networks are connected.
         /// Eventually we may want to prefer WiFi if available (see code in HearThis), or even broadcast on all of them.
+        ///
+        /// See https://stackoverflow.com/questions/6803073/get-local-ip-address/27376368#27376368 for a way
+        /// to determine which of potentially multiple IP addresses will be the one used. The technique is used
+        /// successfully in BloomReaderTCPListener::ListenForTCPMessages(), whose development was done with a
+        /// laptop that had 9 IP addresses (comprising a mix of IPv4 and IPv6). In that development the function
+        /// below always returned an address different from the one actually being used.
         /// </summary>
         /// <returns></returns>
         private string GetLocalIpAddress()
@@ -154,6 +167,7 @@ namespace Bloom.Publish.BloomPub.wifi
                 }
                 localIp = ipAddress.ToString();
             }
+            Debug.WriteLine("WM, WiFiAdvertiser::GetLocalIpAddress, returning localIp = " + localIp); // WM, temporary
             return localIp ?? "Could not determine IP Address!";
         }
 
@@ -163,6 +177,7 @@ namespace Bloom.Publish.BloomPub.wifi
                 return;
 
             //EventLog.WriteEntry("Application", "Advertiser Stopping...", EventLogEntryType.Information);
+            Debug.WriteLine("WM, WiFiAdvertiser::Stop, work thread stop"); // WM, temporary
             _thread.Abort();
             _thread.Join(2 * 1000);
             _thread = null;

@@ -23,7 +23,8 @@ namespace Bloom.Publish.BloomPub.wifi
         private readonly BookServer _bookServer;
         private readonly WebSocketProgress _progress;
         private WiFiAdvertiser _wifiAdvertiser;
-        private BloomReaderUDPListener _wifiListener;
+        //private BloomReaderUDPListener _wifiListener;
+        private BloomReaderTCPListener _wifiListener;
         public const string ProtocolVersion = "2.0";
 
         // This is the web client we use in StartSendBookToClientOnLocalSubNet() to send a book to an android.
@@ -49,14 +50,25 @@ namespace Bloom.Publish.BloomPub.wifi
         {
             if (_wifiAdvertiser != null)
             {
+                Debug.WriteLine("WM, WiFiPublisher::Start, null _wifiAdvertiser, stopping"); // WM, temporary
                 Stop();
             }
+
+            // WM - experiment: change Reader's reply to UDP advertisement from UDP to TCP.
+            // Here, the Desktop side will need receiving code that speaks TCP.
+            // Seems like the biggest change will be to replace BloomReaderUDPListener with
+            // something that acts as similarly as possible but uses TCP instead of UDP.
+            // Maybe call it BloomReaderTCPListener?
 
             // This listens for a BloomReader to request a book.
             // It requires a firewall hole allowing Bloom to receive messages on _portToListen.
             // We initialize it before starting the Advertiser to avoid any chance of a race condition
             // where a BloomReader manages to request an advertised book before we start the listener.
-            _wifiListener = new BloomReaderUDPListener();
+            //Debug.WriteLine("WM, WiFiPublisher::Start, creating BloomReaderUDPListener"); // WM, temporary
+            //_wifiListener = new BloomReaderUDPListener();
+            Debug.WriteLine("WM, WiFiPublisher::Start, creating BloomReaderTCPListener"); // WM, temporary
+            _wifiListener = new BloomReaderTCPListener();
+            Debug.WriteLine("WM, WiFiPublisher::Start, BloomReaderTCPListener created"); // WM, temporary
             _wifiListener.NewMessageReceived += (sender, args) =>
             {
                 var json = Encoding.UTF8.GetString(args.Data);
@@ -66,13 +78,16 @@ namespace Bloom.Publish.BloomPub.wifi
                     // The property names used here must match the ones in BloomReader, doInBackground method of SendMessage,
                     // a private class of NewBookListenerService.
                     var androidIpAddress = (string)settings.deviceAddress;
+                    Debug.WriteLine("WM, WiFiPublisher::Start, got androidIpAddress = " + androidIpAddress); // WM, temporary
 
                     var androidName = (string)settings.deviceName;
+                    Debug.WriteLine("WM, WiFiPublisher::Start, got androidName = " + androidName); // WM, temporary
                     // This prevents the device (or other devices) from queuing up requests while we're busy with this one.
                     // In effect, the Android is only allowed to request a retry after we've given up this try at sending.
                     // Of course, there are async effects from network latency. But if we do get another request while
                     // handling this one, we will ignore it, since StartSendBook checks for a transfer in progress.
                     _wifiAdvertiser.Paused = true;
+                    Debug.WriteLine("WM, WiFiPublisher::Start, calling StartSendBookOverWiFi()"); // WM, temporary
                     StartSendBookOverWiFi(
                         book,
                         androidIpAddress,
@@ -87,6 +102,7 @@ namespace Bloom.Publish.BloomPub.wifi
                 catch (Exception ex)
                     when (ex is JsonReaderException || ex is JsonSerializationException)
                 {
+                    Debug.WriteLine("WM, WiFiPublisher::Start, exception " + ex); // WM, temporary
                     _progress.Message(
                         idSuffix: "BadBookRequest",
                         message: "Got a book request we could not process. Possibly the device is running an incompatible version of BloomReader?",
@@ -102,6 +118,8 @@ namespace Bloom.Publish.BloomPub.wifi
             };
 
             var pathHtmlFile = book.GetPathHtmlFile();
+            Debug.WriteLine("WM, WiFiPublisher::Start, book's pathHtmlFile = " + pathHtmlFile); // WM, temporary
+            Debug.WriteLine("WM, WiFiPublisher::Start, instantiating _wifiAdvertiser"); // WM, temporary
             _wifiAdvertiser = new WiFiAdvertiser(_progress)
             {
                 BookTitle = BookStorage.SanitizeNameForFileSystem(book.Title), // must be the exact same name as the file we will send if requested
@@ -113,6 +131,7 @@ namespace Bloom.Publish.BloomPub.wifi
             };
 
             PublishToBloomPubApi.CheckBookLayout(book, _progress);
+            Debug.WriteLine("WM, WiFiPublisher::Start, starting _wifiAdvertiser"); // WM, temporary
             _wifiAdvertiser.Start();
 
             var part1 = LocalizationManager.GetDynamicString(
@@ -134,10 +153,12 @@ namespace Bloom.Publish.BloomPub.wifi
         {
             // Locked to avoid contention with code in the thread that reports a transfer complete,
             // which disposes of _wifiSender and tries to restart the advertiser.
+            Debug.WriteLine("WM, WiFiPublisher::Stop, taking lock-A"); // WM, temporary
             lock (this)
             {
                 if (_wifiAdvertiser != null)
                 {
+                    Debug.WriteLine("WM, WiFiPublisher::Stop, deleting _wifiAdvertiser"); // WM, temporary
                     _wifiAdvertiser.Stop();
                     _wifiAdvertiser.Dispose();
                     _wifiAdvertiser = null;
@@ -154,6 +175,7 @@ namespace Bloom.Publish.BloomPub.wifi
                     _uploadTimer = null;
                 }
             }
+            Debug.WriteLine("WM, WiFiPublisher::Stop, exited locked section-A"); // WM, temporary
             // To avoid leaving a thread around when quitting, try to wait for the sender to cancel or complete.
             // We expect another thread to set _wifiSender to null in the UploadDataCompleted event
             // (which is supposed to be triggered also by canceling).
@@ -161,6 +183,7 @@ namespace Bloom.Publish.BloomPub.wifi
             {
                 Thread.Sleep(100);
             }
+            Debug.WriteLine("WM, WiFiPublisher::Stop, taking lock-B"); // WM, temporary
             lock (this)
             {
                 if (_wifiSender != null)
@@ -179,6 +202,7 @@ namespace Bloom.Publish.BloomPub.wifi
                     Debug.WriteLine("had to force dispose sender");
                 }
             }
+            Debug.WriteLine("WM, WiFiPublisher::Stop, exited locked section-B"); // WM, temporary
             if (_wifiListener != null)
             {
                 {
@@ -211,6 +235,7 @@ namespace Bloom.Publish.BloomPub.wifi
         {
             // Locked in case more than one thread at a time can handle incoming packets, though I don't think
             // this is true. Also, Stop() on the main thread cares whether _wifiSender is null.
+            Debug.WriteLine("WM, WiFiPublisher::SSBTCOLS, taking lock-A"); // WM, temporary
             lock (this)
             {
                 // We only support one send at a time. If we somehow get more than one request, we ignore the other.
@@ -218,10 +243,13 @@ namespace Bloom.Publish.BloomPub.wifi
                 if (_wifiSender != null) // indicates transfer in progress
                     return;
                 // now THIS transfer is 'in progress' as far as any thread checking this is concerned.
+                Debug.WriteLine("WM, WiFiPublisher::SSBTCOLS, creating WebClient for sending"); // WM, temporary
                 _wifiSender = new WebClient();
             }
+            Debug.WriteLine("WM, WiFiPublisher::SSBTCOLS, exited lock-A"); // WM, temporary
             _wifiSender.UploadDataCompleted += WifiSenderUploadCompleted;
             // Now we actually start the send...but using an async API, so there's no long delay here.
+            Debug.WriteLine("WM, WiFiPublisher::SSBTCOLS, beginning book send"); // WM, temporary
             PublishToBloomPubApi.SendBook(
                 book,
                 _bookServer,
@@ -229,6 +257,7 @@ namespace Bloom.Publish.BloomPub.wifi
                 (publishedFileName, bloomDPath) =>
                 {
                     var androidHttpAddress = "http://" + androidIpAddress + ":5914"; // must match BloomReader SyncServer._serverPort.
+                    Debug.WriteLine("WM, WiFiPublisher::SSBTCOLS, androidHttpAddress = " + androidHttpAddress); // WM, temporary
                     _wifiSender.UploadDataAsync(
                         new Uri(
                             androidHttpAddress
@@ -258,6 +287,7 @@ namespace Bloom.Publish.BloomPub.wifi
             // is different from the one we're advertising, update the advertisement, so at least subsequent
             // advertisements will conform to the version the device just got.
             _wifiAdvertiser.BookVersion = BloomPubMaker.HashOfMostRecentlyCreatedBook;
+            Debug.WriteLine("WM, WiFiPublisher::SSBTCOLS, taking lock-B"); // WM, temporary
             lock (this)
             {
                 // The UploadDataCompleted event handler quit working at Bloom 4.6.1238 Alpha (Windows test build).
@@ -273,7 +303,10 @@ namespace Bloom.Publish.BloomPub.wifi
                     _uploadTimer.Elapsed += (sender, args) =>
                     {
                         if (_wifiSender != null && _wifiSender.IsBusy)
+                        {
+                            Debug.WriteLine("WM, WiFiPublisher::SSBTCOLS, returning while in lock-B"); // WM, temporary
                             return;
+                        }
                         _uploadTimer.Stop();
                         Debug.WriteLine("upload timed out, appears to be finished");
                         WifiSenderUploadCompleted(_uploadTimer, null);
@@ -281,6 +314,7 @@ namespace Bloom.Publish.BloomPub.wifi
                 }
                 _uploadTimer.Start();
             }
+            Debug.WriteLine("WM, WiFiPublisher::SSBTCOLS, exited lock-B"); // WM, temporary
             PublishToBloomPubApi.ReportAnalytics("wifi", book);
         }
 
@@ -298,6 +332,7 @@ namespace Bloom.Publish.BloomPub.wifi
 
             // To avoid contention with Stop(), which may try to cancel the send if it finds
             // an existing wifiSender, and may destroy the advertiser we are trying to restart.
+            Debug.WriteLine("WM, WiFiPublisher::WifiSenderUploadCompleted, taking lock"); // WM, temporary
             lock (this)
             {
                 Debug.WriteLine(
@@ -317,6 +352,7 @@ namespace Bloom.Publish.BloomPub.wifi
                     _uploadTimer = null;
                 }
             }
+            Debug.WriteLine("WM, WiFiPublisher::WifiSenderUploadCompleted, exited locked section"); // WM, temporary
         }
 
         private void StartSendBookOverWiFi(
@@ -329,6 +365,7 @@ namespace Bloom.Publish.BloomPub.wifi
         {
             try
             {
+                Debug.WriteLine("WM, WiFiPublisher::StartSendBookOverWiFi, calling SSBTCOLS()"); // WM, temporary
                 StartSendBookToClientOnLocalSubNet(
                     book,
                     androidIpAddress,
