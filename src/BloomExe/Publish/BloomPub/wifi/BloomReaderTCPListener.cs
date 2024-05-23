@@ -17,12 +17,11 @@ namespace Bloom.Publish.BloomPub.wifi
     {
         // must match BloomReader.NewBookListenerService.desktopPort
         // and be different from WiFiAdvertiser.Port and port in BloomReaderPublisher.SendBookToWiFi
+        // WM: we should be able to use same port here for TCP as UDP uses.
         //
-        // WM: use same port (5915) here for TCP as UDP uses. Can't think of a reason not to
-        // since that UDP channel is not used...
         // ListenForTCPMessages() is based on example TCP *server* code from:
         //     https://www.geeksforgeeks.org/socket-programming-in-c-sharp/
-        // This same page also has an example TCP *client*, which will benefit Bloom Reader.
+        // This page also has an example TCP *client*, which benefits Bloom Reader.
 
         private int _portToListen = 5915;
         Thread _listeningThread;
@@ -34,7 +33,6 @@ namespace Bloom.Publish.BloomPub.wifi
         public BloomReaderTCPListener()
         {
             Debug.WriteLine("WM, BloomReaderTCPListener, creating thread"); // WM, temporary
-            //_listeningThread = new Thread(ListenForUDPPackages);
             _listeningThread = new Thread(ListenForTCPMessages);
             _listeningThread.IsBackground = true;
             Debug.WriteLine("WM, BloomReaderTCPListener, starting thread"); // WM, temporary
@@ -50,7 +48,7 @@ namespace Bloom.Publish.BloomPub.wifi
             // Creating local endpoint requires the IP address of *this* (the local) machine.
             // Since a machine running BloomDesktop can have multiple IP addresses (mine has 9,
             // a mix of both IPv4 and IPv6), we must be judicious in selecting the one that will
-            // actually get used by Desktop. A post at
+            // actually get used by network interface. A post at
             // https://stackoverflow.com/questions/6803073/get-local-ip-address/27376368#27376368
             // shows a way to do that:
             //   "Connect a UDP socket and read its local endpoint.
@@ -63,7 +61,7 @@ namespace Bloom.Publish.BloomPub.wifi
             //    sockets API (a side effect of UDP "connected" state) that works reliably in both
             //    Windows and Linux across versions and distributions.
             //    So, this method will give the local address that would be used to connect to the
-            //    specified remote host.There is no real connection established, hence the specified
+            //    specified remote host. There is no real connection established, hence the specified
             //    remote ip can be unreachable."
             IPEndPoint endpoint;
             using (Socket socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, 0))
@@ -80,43 +78,41 @@ namespace Bloom.Publish.BloomPub.wifi
 
             try
             {
-                // Associate a network address with the socket.
+                // Bind the network address to the socket.
                 listener.Bind(localEndPoint);
 
                 // Put socket in listening mode. Max number of pending connections = 10 (too much?).
                 // This is a non-blocking call.
                 listener.Listen(10);
 
-                // Maintain an incrementing ID of received messages so they can be distinguished
-                // from one another (otherwise scrolling console text looks identical).
+                // DEBUG ONLY:: maintain an incrementing ID of received messages so they can be
+                // distinguished from one another (otherwise scrolling console text looks identical).
                 int incomingMsgId = 1;
 
-                while (true)
+                // Create buffer to receive message.
+                byte[] inBuf = new Byte[_advertMaxLengthExpected];
+
+                while (_listening)
                 {
                     Debug.WriteLine("WM, TCP-listener, waiting for connection..."); // WM, temporary
 
-                    // Create socket for new connection. Bind() and Listen()
+                    // Create socket and wait for new connection. Bind() and Listen()
                     // must have previously been called. This is a blocking call.
                     Socket clientSocket = listener.Accept();
 
-                    // Got connection. Create buffer to receive message from the client.
                     Debug.WriteLine("WM, TCP-listener, connection started"); // WM, temporary
-                    byte[] inBuf = new Byte[_advertMaxLengthExpected];
-
-                    // Receive incoming message. 'inLen' tells how long it is.
+                    // Got connection. Receive incoming message. 'inLen' tells how long it is.
                     int inLen = clientSocket.Receive(inBuf);
 
-                    // Debug only: convert incoming raw bytes to ASCII.
+                    // DEBUG ONLY: convert incoming raw bytes to ASCII, then display.
                     var inBufString = Encoding.ASCII.GetString(inBuf, 0, inLen);
+                    Debug.WriteLine("WM, TCP-listener, message {0} from Reader:", incomingMsgId++);
+                    Debug.WriteLine("   msg = " + inBufString.Substring(0, inLen));
 
                     // Raise event for WiFiPublisher to notice and act on -- this is what
                     // actually gets the book sent to Reader.
-                    Debug.WriteLine("WM, TCP-listener, got {0} bytes from Reader, raising NewMessageReceived", inLen); // WM, temporary
+                    Debug.WriteLine("WM, TCP-listener, got {0} bytes from Reader, raising \'NewMessageReceived\'", inLen); // WM, temporary
                     NewMessageReceived?.Invoke(this, new AndroidMessageArgs(inBuf));
-
-                    // Debug only: show the request from Reader (which is 'inLen' bytes long).
-                    Debug.WriteLine("WM, TCP-listener, message {0} from Reader:", incomingMsgId++);
-                    Debug.WriteLine("   msg = " + inBufString.Substring(0, inLen));
 
                     // Close connection (actual book transfer is done elsewhere, by SyncServer).
                     clientSocket.Shutdown(SocketShutdown.Both);
