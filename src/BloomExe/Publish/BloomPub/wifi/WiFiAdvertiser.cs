@@ -16,12 +16,6 @@ namespace Bloom.Publish.BloomPub.wifi
     /// </summary>
     public class WiFiAdvertiser : IDisposable
     {
-        public static string GetLocalIpAddress2()
-        //public string GetLocalIpAddress2()
-        {
-            return "bogus";
-        }
-
         // The information we will advertise.
         public string BookTitle;
         private string _bookVersion;
@@ -125,12 +119,10 @@ namespace Bloom.Publish.BloomPub.wifi
         private void UpdateAdvertisementBasedOnCurrentIpAddress()
         {
             Debug.WriteLine("WM, WiFiAdvertiser::UABOCIA, begin, _cachedIpAddress = " + _cachedIpAddress); // WM, temporary
-            //if (_currentIpAddress != GetLocalIpAddress())
             _currentIpAddress = GetIpAddressOfNetworkIface();
             if (_cachedIpAddress != _currentIpAddress)
-                {
-                //_currentIpAddress = GetLocalIpAddress();
-                _cachedIpAddress = _currentIpAddress;
+            {
+                _cachedIpAddress = _currentIpAddress;   // cache updated address
                 dynamic advertisement = new DynamicJson();
                 advertisement.title = BookTitle;
                 advertisement.version = BookVersion;
@@ -179,20 +171,19 @@ namespace Bloom.Publish.BloomPub.wifi
         // multiple IP addresses (mine has 9, a mix of both IPv4 and IPv6), we must be judicious in selecting the
         // one that will actually be used by network interface. Unfortunately, GetLocalIpAddress() does not always
         // return the correct address.
-        // BloomReaderTCPListener.ListenForTCPMessages() implementes a mechanims that does. That code provides the
+        // BloomReaderTCPListener.ListenForTCPMessages() implements a mechanims that does. That code provides the
         // basis for this function, and also describes how the mechanism works.
         // This function is static so that other code can use it too (I thought at first that ListenForTCPMessages()
         // could call it, but not so - it needs a more complex return type). Future code, which must be in namespace
-        // 'Bloom.Publish.BloomPub.wifi') could call into here like this:
+        // 'Bloom.Publish.BloomPub.wifi', could call into here like this:
         //      string ipAddr = WiFiAdvertiser.GetIpAddressOfNetworkIface();
         public static string GetIpAddressOfNetworkIface()
         {
             IPEndPoint endpoint;
-            using (Socket socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, 0))
-            {
-                socket.Connect("8.8.8.8", 65530);  // Google's public DNS service
-                endpoint = socket.LocalEndPoint as IPEndPoint;
-            }
+            Socket socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, 0);
+            socket.Connect("8.8.8.8", 65530);  // Google's public DNS service
+            endpoint = socket.LocalEndPoint as IPEndPoint;
+
             Debug.WriteLine("WM, WiFiAdvertiser::GetIpAddressOfNetworkIface, IPv4 address = " + endpoint.Address.ToString()); // WM, temporary
             return endpoint.Address.ToString();
         }

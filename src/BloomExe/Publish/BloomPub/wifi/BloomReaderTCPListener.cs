@@ -65,16 +65,9 @@ namespace Bloom.Publish.BloomPub.wifi
             //    specified remote host. There is no real connection established, hence the specified
             //    remote ip can be unreachable."
             IPEndPoint endpoint;
-            using (Socket socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, 0))
-            {
-                socket.Connect("8.8.8.8", 65530);  // Google's public DNS service
-                endpoint = socket.LocalEndPoint as IPEndPoint;
-                Debug.WriteLine("WM, TCP-listener, IPv4 address = " + endpoint.Address.ToString()); // WM, temporary
-            }
-
-            // WM TEMPORARY, JUST TO WORK OUT SCOPE
-            string temptest = WiFiAdvertiser.GetLocalIpAddress2();
-            Debug.WriteLine("WM, TCP-listener, temptest = " + temptest);
+            Socket socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, 0);
+            socket.Connect("8.8.8.8", 65530);  // Google's public DNS service
+            endpoint = socket.LocalEndPoint as IPEndPoint;
 
             // Now can create the local endpoint and socket, using the tested IP address.
             Debug.WriteLine("WM, TCP-listener, creating listener on " + endpoint.Address.ToString()); // WM, temporary
