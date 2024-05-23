@@ -385,25 +385,7 @@ namespace Bloom.Edit
             _splitContainer2.Panel2Collapsed = true; // used to hold TemplatesPagesView
         }
 
-        void VisibleNowAddSlowContents(object sender, EventArgs e)
-        {
-            //TODO: this is causing green boxes when you quit while it is still working
-            //we should change this to a proper background task, with good
-            //cancellation in case we switch documents.  Note we may also switch
-            //to some other way of making the thumbnails... e.g. it would be nice
-            //to have instant placeholders, with thumbnails later.
-
-            Application.Idle -= new EventHandler(VisibleNowAddSlowContents);
-
-            CheckFontAvailability();
-
-            Cursor = Cursors.WaitCursor;
-            _model.ViewVisibleNowDoSlowStuff();
-
-            Cursor = Cursors.Default;
-        }
-
-        private void CheckFontAvailability()
+        public void CheckFontAvailability()
         {
             var fontMessage = _model.GetFontAvailabilityMessage();
             if (!string.IsNullOrEmpty(fontMessage))
@@ -425,6 +407,7 @@ namespace Bloom.Edit
             _visible = visible;
             if (visible)
             {
+                Cursor = Cursors.WaitCursor;
                 if (_model.GetBookHasChanged())
                 {
                     //now we're doing it based on the focus textarea: ShowOrHideSourcePane(_model.ShowTranslationPanel);
@@ -432,13 +415,12 @@ namespace Bloom.Edit
                     //even before showing, we need to clear some things so the user doesn't see the old stuff
                     _pageListView.Clear();
                 }
-                Application.Idle += new EventHandler(VisibleNowAddSlowContents);
-                Cursor = Cursors.WaitCursor;
+                _model.OnBecomeVisible();
                 Logger.WriteEvent("Entered Edit Tab");
+                Cursor = Cursors.Default;
             }
             else
             {
-                Application.Idle -= new EventHandler(VisibleNowAddSlowContents); //make sure
                 _browser1.Navigate("about:blank", false); //so we don't see the old one for moment, the next time we open this tab
                 _model.ClearBookForToolboxContent(); // there's no longer a frame ready for a new page displayed in the browser.
             }
@@ -472,8 +454,7 @@ namespace Bloom.Edit
                 _beginPageLoad = DateTime.Now;
                 _pageListView.SelectThumbnailWithoutSendingEvent(page);
                 _pageListView.UpdateThumbnailAsync(page);
-                _model.SetupServerWithCurrentPageIframeContents();
-                HtmlDom domForCurrentPage = _model.GetXmlDocumentForCurrentPage();
+                _model.SaveStateForFullSaveDecision();
                 // A page can't be 'dirty' in the interval between when we start to navigate to it and when it's visible.
                 // (The previous page should have been fully saved before we begin such navigation, so we don't
                 // need to worry about losing changes there.)
@@ -505,23 +486,11 @@ namespace Bloom.Edit
                 )
                 {
                     // Keep the top document and toolbox iframe, just navigate the page iframe to the new page.
-                    _browser1.SetEditDom(domForCurrentPage);
-                    if (ReloadCurrentPage())
-                    {
-                        Logger.WriteEvent("changing page via Navigate(\"CURRENTPAGE.htm\")");
-                        _browser1.Navigate(
-                            BloomServer.ServerUrlWithBloomPrefixEndingInSlash + "CURRENTPAGE.htm",
-                            false
-                        );
-                    }
-                    else
-                    {
-                        Logger.WriteEvent("changing page via editTabBundle.switchContentPage()");
-                        var pageUrl = _model.GetUrlForCurrentPage();
-                        RunJavascriptWithStringResult_Sync_Dangerous(
-                            "editTabBundle.switchContentPage('" + pageUrl + "');"
-                        );
-                    }
+                    Logger.WriteEvent("changing page via editTabBundle.switchContentPage()");
+                    var pageUrl = _model.GetUrlForCurrentPage();
+                    _browser1.RunJavascriptFireAndForget(
+                        "editTabBundle.switchContentPage('" + pageUrl + "');"
+                    );
                 }
                 else
                 {
@@ -530,12 +499,10 @@ namespace Bloom.Edit
                     var dom = _model.GetXmlDocumentForEditScreenWebPage();
                     _browser1.Navigate(
                         dom,
-                        domForCurrentPage,
                         setAsCurrentPageForDebugging: true,
                         source: InMemoryHtmlFileSource.Frame
                     );
                 }
-                _model.CheckForBL2634("navigated to page");
                 SetModalState(false); // ensure _pageListView is enabled (BL-9712).
             }
 #if MEMORYCHECK
@@ -565,13 +532,6 @@ namespace Bloom.Edit
         // For 4.9 and 5.0 betas/releases, we set this to MemoryUtils.SystemIsShortOfMemory(),
         // but you can also set it to true so the full reload gets more testing (e.g. in alpha).
         private bool ShouldDoFullReload() => MemoryUtils.SystemIsShortOfMemory();
-
-        private bool ReloadCurrentPage()
-        {
-            // Note that ModifierKeys does not seem to work on Linux.
-            return ((ModifierKeys & Keys.Shift) == Keys.Shift)
-                || RobustFile.Exists("/tmp/UseCURRENTPAGE");
-        }
 
         private bool UseBackgroundGC()
         {
@@ -622,14 +582,6 @@ namespace Bloom.Edit
             }
             _pageListApi.ClearPagesCache();
             _pageListView.SetBook(_model.CurrentBook);
-        }
-
-        [Obsolete(
-            "This method is dangerous because it has to loop Application.DoEvents(). RunJavaScriptAsync() is preferred."
-        )]
-        internal string RunJavascriptWithStringResult_Sync_Dangerous(string script)
-        {
-            return _browser1.RunJavascriptWithStringResult_Sync_Dangerous(script);
         }
 
         internal async Task<string> GetStringFromJavascriptAsync(string script)
@@ -774,11 +726,11 @@ namespace Bloom.Edit
             }
         }
 
-        public void OnCutImage(int imgIndex)
+        public void OnCutImage(string imageId, UrlPathString imageSrc)
         {
             var bookFolderPath = _model.CurrentBook.FolderPath;
 
-            if (CopyImageToClipboard(imgIndex, bookFolderPath)) // returns 'true' if successful
+            if (CopyImageToClipboard(imageSrc, bookFolderPath)) // returns 'true' if successful
             {
                 // Replace current image with placeHolder.png
                 // N.B. It is unnecessary to check for the existence of this file, since selecting a book in
@@ -787,26 +739,21 @@ namespace Bloom.Edit
                 var path = Path.Combine(bookFolderPath, "placeHolder.png");
                 using (var palasoImage = PalasoImage.FromFileRobustly(path))
                 {
-                    var imageElement = GetImageNode(imgIndex);
-                    _model.ChangePicture(imgIndex, imageElement, palasoImage, new NullProgress());
+                    _model.ChangePicture(imageId, imageSrc, palasoImage);
                 }
             }
         }
 
-        public void OnCopyImage(int imgIndex)
+        public void OnCopyImage(UrlPathString imageSrc)
         {
             // NB: bloomImages.js contains code that prevents us arriving here
             // if our image is simply the placeholder flower
 
-            CopyImageToClipboard(imgIndex, _model.CurrentBook.FolderPath);
+            CopyImageToClipboard(imageSrc, _model.CurrentBook.FolderPath);
         }
 
-        public void OnPasteImage(int imgIndex)
+        public void OnPasteImage(string imageId, UrlPathString priorImageSrc)
         {
-            // BL-11709: It's just possible that the element we are pasting into has not yet been saved,
-            // which will cause problems. So do a save before pasting.
-            _model.SaveNow();
-
             using (var measure = PerformanceMeasurement.Global.Measure("Paste Image"))
             {
                 PalasoImage clipboardImage = null;
@@ -839,9 +786,6 @@ namespace Bloom.Edit
                         return;
                     }
 
-                    var imageElement = GetImageNode(imgIndex);
-                    if (imageElement == null)
-                        return;
                     Cursor = Cursors.WaitCursor;
 
                     //nb: Taglib# requires an extension that matches the file content type.
@@ -853,12 +797,7 @@ namespace Bloom.Edit
                             "[Paste Image] Pasting jpeg image {0}",
                             clipboardImage.OriginalFilePath
                         );
-                        _model.ChangePicture(
-                            imgIndex,
-                            imageElement,
-                            clipboardImage,
-                            new NullProgress()
-                        );
+                        _model.ChangePicture(imageId, priorImageSrc, clipboardImage);
                     }
                     else
                     {
@@ -868,12 +807,7 @@ namespace Bloom.Edit
                             Logger.WriteMinorEvent(
                                 "[Paste Image] Pasting image directly from clipboard (e.g. screenshot)"
                             );
-                            _model.ChangePicture(
-                                imgIndex,
-                                imageElement,
-                                clipboardImage,
-                                new NullProgress()
-                            );
+                            _model.ChangePicture(imageId, priorImageSrc, clipboardImage);
                         }
                         //they pasted a path to a png
                         else if (
@@ -885,12 +819,7 @@ namespace Bloom.Edit
                                 "[Paste Image] Pasting png file {0}",
                                 clipboardImage.OriginalFilePath
                             );
-                            _model.ChangePicture(
-                                imgIndex,
-                                imageElement,
-                                clipboardImage,
-                                new NullProgress()
-                            );
+                            _model.ChangePicture(imageId, priorImageSrc, clipboardImage);
                         }
                         else // they pasted a path to some other bitmap format
                         {
@@ -919,12 +848,7 @@ namespace Bloom.Edit
 
                                 using (var palasoImage = PalasoImage.FromFileRobustly(temp.Path))
                                 {
-                                    _model.ChangePicture(
-                                        imgIndex,
-                                        imageElement,
-                                        palasoImage,
-                                        new NullProgress()
-                                    );
+                                    _model.ChangePicture(imageId, priorImageSrc, palasoImage);
                                 }
                             }
                         }
@@ -952,81 +876,58 @@ namespace Bloom.Edit
             return PortableClipboard.GetImageFromClipboard();
         }
 
-        private bool CopyImageToClipboard(int imgIndex, string bookFolderPath)
+        private bool CopyImageToClipboard(UrlPathString imageSrc, string bookFolderPath)
         {
-            var imageElement = GetImageNode(imgIndex);
-            if (imageElement != null)
+            var path = Path.Combine(bookFolderPath, imageSrc.PathOnly.NotEncoded);
+            try
             {
-                var url = HtmlDom.GetImageElementUrl(imageElement);
-                if (String.IsNullOrEmpty(url.PathOnly.NotEncoded))
-                    return false;
-
-                var path = Path.Combine(bookFolderPath, url.PathOnly.NotEncoded);
-                try
+                using (var image = PalasoImage.FromFileRobustly(path))
                 {
-                    using (var image = PalasoImage.FromFileRobustly(path))
-                    {
-                        PortableClipboard.CopyImageToClipboard(image);
-                    }
-                    return true;
+                    PortableClipboard.CopyImageToClipboard(image);
                 }
-                catch (NotImplementedException)
-                {
-                    var msg = LocalizationManager.GetDynamicString(
-                        "Bloom",
-                        "ImageToClipboard",
-                        "Copying an image to the clipboard is not yet implemented in Bloom for Linux.",
-                        "message for messagebox warning to user"
-                    );
-                    var header = LocalizationManager.GetDynamicString(
-                        "Bloom",
-                        "NotImplemented",
-                        "Not Yet Implemented",
-                        "header for messagebox warning to user"
-                    );
-                    MessageBox.Show(msg, header);
-                }
-                catch (ExternalException e)
-                {
-                    Logger.WriteEvent("CopyImageToClipboard -> ExternalException: " + e.Message);
-                    var msg =
-                        LocalizationManager.GetDynamicString(
-                            "Bloom",
-                            "EditTab.Image.CopyImageFailed",
-                            "Bloom had problems using your computer's clipboard. Some other program may be interfering."
-                        )
-                        + Environment.NewLine
-                        + Environment.NewLine
-                        + LocalizationManager.GetDynamicString(
-                            "Bloom",
-                            "EditTab.Image.TryRestart",
-                            "Try closing other programs and restart your computer if necessary."
-                        );
-                    MessageBox.Show(msg);
-                }
-                catch (Exception e)
-                {
-                    Debug.Fail(e.Message);
-                    Logger.WriteEvent("CopyImageToClipboard:" + e.Message);
-                }
+                return true;
             }
-            return false;
-        }
+            catch (NotImplementedException)
+            {
+                var msg = LocalizationManager.GetDynamicString(
+                    "Bloom",
+                    "ImageToClipboard",
+                    "Copying an image to the clipboard is not yet implemented in Bloom for Linux.",
+                    "message for messagebox warning to user"
+                );
+                var header = LocalizationManager.GetDynamicString(
+                    "Bloom",
+                    "NotImplemented",
+                    "Not Yet Implemented",
+                    "header for messagebox warning to user"
+                );
+                MessageBox.Show(msg, header);
+            }
+            catch (ExternalException e)
+            {
+                Logger.WriteEvent("CopyImageToClipboard -> ExternalException: " + e.Message);
+                var msg =
+                    LocalizationManager.GetDynamicString(
+                        "Bloom",
+                        "EditTab.Image.CopyImageFailed",
+                        "Bloom had problems using your computer's clipboard. Some other program may be interfering."
+                    )
+                    + Environment.NewLine
+                    + Environment.NewLine
+                    + LocalizationManager.GetDynamicString(
+                        "Bloom",
+                        "EditTab.Image.TryRestart",
+                        "Try closing other programs and restart your computer if necessary."
+                    );
+                MessageBox.Show(msg);
+            }
+            catch (Exception e)
+            {
+                Debug.Fail(e.Message);
+                Logger.WriteEvent("CopyImageToClipboard:" + e.Message);
+            }
 
-        private XmlElement GetImageNode(int imgIndex)
-        {
-            var containers = _model
-                .GetXmlDocumentForCurrentPage()
-                .SafeSelectNodes("//div[contains(@class, 'bloom-imageContainer')]")
-                .Cast<XmlElement>();
-            var container = containers.Skip(imgIndex).First();
-            var img =
-                container.ChildNodes
-                    .Cast<XmlNode>()
-                    .FirstOrDefault(x => x.Name.ToLowerInvariant() == "img") as XmlElement;
-            if (img == null)
-                return container;
-            return img;
+            return false;
         }
 
         /// <summary>
@@ -1051,31 +952,22 @@ namespace Bloom.Edit
             return true;
         }
 
-        public void OnChangeImage(int imgIndex)
+        public void OnChangeImage(string imageId, UrlPathString imageSrc)
         {
-            // Make sure any new image overlays on the page are saved, so our imgIndex will select the
-            // right one.
-            Model.SaveNow();
-
-            var imageElement = GetImageNode(imgIndex);
-            if (imageElement == null)
-                return;
-            string currentPath = HtmlDom.GetImageElementUrl(imageElement).PathOnly.NotEncoded;
-
-            if (!CheckIfLockedAndWarn(currentPath))
-                return;
-
             Cursor = Cursors.WaitCursor;
 
             var imageInfo = new PalasoImage();
             Image oldImage = null;
             var oldSize = new Size() { Height = 0, Width = 0 };
-            var existingImagePath = Path.Combine(_model.CurrentBook.FolderPath, currentPath);
+            var existingImagePath = Path.Combine(
+                _model.CurrentBook.FolderPath,
+                imageSrc.PathOnly.NotEncoded
+            );
             string newImagePath = null;
 
             //don't send the placeholder to the imagetoolbox... we get a better user experience if we admit we don't have an image yet.
             if (
-                !currentPath.ToLowerInvariant().Contains("placeholder")
+                !imageSrc.NotEncoded.ToLowerInvariant().Contains("placeholder")
                 && RobustFile.Exists(existingImagePath)
             )
             {
@@ -1261,7 +1153,7 @@ namespace Bloom.Edit
                                 dlg.ImageInfo.Save(newImagePath);
                             }
                             dlg.ImageInfo.SetCurrentFilePath(newImagePath);
-                            SaveChangedImage(imgIndex, imageElement, dlg.ImageInfo, exceptionMsg);
+                            SaveChangedImage(imageId, imageSrc, dlg.ImageInfo, exceptionMsg);
                         }
                         catch (Exception error)
                         {
@@ -1433,8 +1325,8 @@ namespace Bloom.Edit
         }
 
         public void SaveChangedImage(
-            int imgIndex,
-            XmlElement imageElement,
+            string imageId,
+            UrlPathString priorImageSrc,
             PalasoImage imageInfo,
             string exceptionMsg
         )
@@ -1443,7 +1335,7 @@ namespace Bloom.Edit
             {
                 if (ShouldBailOutBecauseUserAgreedNotToUseJpeg(imageInfo))
                     return;
-                _model.ChangePicture(imgIndex, imageElement, imageInfo, new NullProgress());
+                _model.ChangePicture(imageId, priorImageSrc, imageInfo);
             }
             catch (System.IO.IOException error)
             {
@@ -1491,11 +1383,13 @@ namespace Bloom.Edit
         }
 
         /// <summary>
-        /// this started as an experiment, where our textareas were not being read when we saved because of the need
-        /// to change the picture
+        /// Read the current page from the browser, clean out stuff that is just UI and should not be saved,
+        /// and possibly other stuff not needed for saving changes to the page, and return it as an XmlDocument.
         /// </summary>
-        public void CleanHtmlAndCopyToPageDom()
+        public XmlDocument GetCleanCurrentPageFromBrowser()
         {
+            if (_browser1.Url == "about:blank")
+                return null; // too late, we can't get any page content
             var script = @"editTabBundle.getEditablePageBundleExports().pageSelectionChanging();";
             var combinedData = _browser1.RunJavascriptThatPostsStringResultSync(script);
             string bodyHtml = null;
@@ -1509,7 +1403,98 @@ namespace Bloom.Edit
                     userCssContent = combinedData.Substring(endHtml + "<SPLIT-DATA>".Length);
                 }
             }
-            _browser1.ReadEditableAreasNow(bodyHtml, userCssContent);
+            return GetCleanCurrentPageFromBodyAndCss(bodyHtml, userCssContent);
+        }
+
+        /// <summary>
+        /// What's going on here: the browser is just editing/displaying a copy of one page of the document.
+        /// So we need to copy any changes back to the real DOM.
+        /// We're now obtaining the new content another way, so this code doesn't have any reason
+        /// to be in this class...but we're aiming for a minimal change, maximal safety fix for 4.9
+        /// </summary>
+        private XmlDocument GetCleanCurrentPageFromBodyAndCss(
+            string bodyHtml,
+            string userCssContent
+        )
+        {
+            Debug.Assert(!InvokeRequired);
+
+            try
+            {
+                // unlikely, but if we somehow couldn't get the new content, better keep the old.
+                // This MIGHT be able to happen in some cases of very fast page clicking, where
+                // the page isn't fully enough loaded to expose the functions we use to get the
+                // content. In that case, the user can't have made changes, so not saving is fine.
+                if (string.IsNullOrEmpty(bodyHtml))
+                    return null;
+
+                var content = bodyHtml;
+                XmlDocument dom;
+
+                //todo: deal with exception that can come out of this
+                dom = XmlHtmlConverter.GetXmlDomFromHtml(content, false);
+                var bodyDom = dom.SelectSingleNode("//body");
+
+                var browserDomPage = bodyDom.SelectSingleNode(
+                    "//body//div[contains(@class,'bloom-page')]"
+                );
+                if (browserDomPage == null)
+                    return null; //why? but I've seen it happen
+
+                // We've seen pages get emptied out, and we don't know why. This is a safety check.
+                // See BL-13078, BL-13120, BL-13123, and BL-13143 for examples.
+                if (BookStorage.CheckForEmptyMarginBoxOnPage(browserDomPage as XmlElement))
+                {
+                    // This has been logged and reported to the user. We don't want to save the empty page.
+                    return null;
+                }
+
+                SaveCustomizedCssRules(dom, userCssContent);
+                try
+                {
+                    XmlHtmlConverter.ThrowIfHtmlHasErrors(dom.OuterXml);
+                }
+                catch (Exception e)
+                {
+                    //var exceptionWithHtmlContents = new Exception(content);
+                    ErrorReport.NotifyUserOfProblem(
+                        e,
+                        "Sorry, Bloom choked on something on this page (validating page).{1}{1}+{0}",
+                        e.Message,
+                        Environment.NewLine
+                    );
+                }
+                return dom;
+
+                //enhance: we have jscript for this: cleanup()... but running jscript in this method was leading the browser to show blank screen
+                //				foreach (XmlElement j in _editDom.SafeSelectNodes("//div[contains(@class, 'ui-tooltip')]"))
+                //				{
+                //					j.ParentNode.RemoveChild(j);
+                //				}
+                //				foreach (XmlAttribute j in _editDom.SafeSelectNodes("//@ariasecondary-describedby | //@aria-describedby"))
+                //				{
+                //					j.OwnerElement.RemoveAttributeNode(j);
+                //				}
+            }
+            catch (Exception e)
+            {
+                Bloom.Utils.MiscUtils.SuppressUnusedExceptionVarWarning(e);
+                Debug.Fail(
+                    "Debug Mode Only: Error while trying to read changes to CSSRules. In Release, this just gets swallowed. Will now re-throw the exception."
+                );
+#if DEBUG
+                throw;
+#endif
+            }
+        }
+
+        private void SaveCustomizedCssRules(XmlDocument dom, string userCssContent)
+        {
+            // Yes, this wipes out everything else in the head. At this point, the only things
+            // we need in _pageEditDom are the user defined style sheet and the bloom-page element in the body.
+            dom.GetElementsByTagName("head")[0].InnerXml = HtmlDom.CreateUserModifiedStyles(
+                userCssContent
+            );
         }
 
         private void _copyButton_Click(object sender, EventArgs e)
@@ -1870,7 +1855,7 @@ namespace Bloom.Edit
         {
             Application.Idle -= SaveWhenIdle; // don't need to do again till next Deactivate.
             _model.SaveNow();
-            // Restore any tool state removed by CleanHtmlAndCopyToPageDom(), which is called by _model.SaveNow().
+            // Restore any tool state removed by GetCleanCurrentPageFromBrowser(), which is called by _model.SaveNow().
             RunJavascriptAsync(
                 "if (typeof(editTabBundle) !=='undefined') {editTabBundle.getToolboxBundleExports().applyToolboxStateToPage();}"
             );
@@ -1915,8 +1900,10 @@ namespace Bloom.Edit
             RunJavascriptAsync("editTabBundle.showPageChooserDialog(true);");
         }
 
+        public int Zoom => EditingView.ZoomSetting;
+
         // The zoom factor that is shown in the top right of the toolbar (a percent).
-        public int Zoom
+        public static int ZoomSetting
         {
             // Whatever the user may have saved (e.g., from earlier use of ctrl-wheel), we'll make this an expected multiple-of-10 percent.
             get

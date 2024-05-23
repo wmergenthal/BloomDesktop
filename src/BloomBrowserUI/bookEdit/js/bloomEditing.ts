@@ -122,6 +122,10 @@ function Cleanup() {
         $(this).removeClass("ui-resizable");
         $(this).removeClass("hoverUp");
     });
+    $("span").each(function() {
+        $(this).removeClass("ui-disableHighlight");
+        $(this).removeClass("ui-enableHighlight");
+    });
 
     $("button")
         // Note, previously this was just removing all <button>s.
@@ -333,42 +337,9 @@ function GetOverflowChecker() {
     return new OverflowChecker();
 }
 
-let onLoadHappenedNormally = false;
-let cancelHandle = 0;
-
-const windowLoadedHandler = () => {
-    onLoadHappenedNormally = true;
-    window.cancelAnimationFrame(cancelHandle);
-    post("editView/editPagePainted");
-};
-
-// When we don't already have a video (either a new page, or it has been deleted),
-// and record a new one, we switchContentPage to make the new video show up.
-// And for no known reason, the window load event never fires. There may possibly be
-// other cases since I have no explanation. Rather than never sending the editPagePainted
-// notification which would prevent saving subsequent changes to the page, if the event
-// is delayed much longer than expected we just call the handler.
-// For a similar event not firing problem, see editViewFrame.switchContentPage().
-window.setTimeout(() => {
-    if (onLoadHappenedNormally) {
-        return;
-    }
-    windowLoadedHandler();
-}, 1000);
-
-window.onload = () => {
-    // onload means we have all the parts, and waiting for one more animation frame
-    // seems to mean it has actually been painted.
-    cancelHandle = window.requestAnimationFrame(windowLoadedHandler);
-};
-
-interface IChangeImageEvent extends IBloomWebSocketEvent {
-    imgIndex: number;
-    src: string;
-    copyright: string;
-    creator: string;
-    license: string;
-}
+document.addEventListener("DOMContentLoaded", () =>
+    post("editView/pageDomLoaded")
+);
 
 // this is also called by the StyleEditor
 export function SetupThingsSensitiveToStyleChanges(container: HTMLElement) {
@@ -392,33 +363,36 @@ export function SetupThingsSensitiveToStyleChanges(container: HTMLElement) {
         });
 }
 
+// called by c# so be careful about changing the signature, including names of parameters
 export function changeImage(imageInfo: {
-    imageIndex: number;
+    imageId: string;
     src: string; // must already appropriately URL-encoded.
     copyright: string;
     creator: string;
     license: string;
 }) {
-    const container = Array.from(
-        document.getElementsByClassName("bloom-imageContainer")
-    )[imageInfo.imageIndex];
-
+    const imgOrImageContainer = document.getElementById(imageInfo.imageId);
+    if (!imgOrImageContainer) {
+        throw new Error(
+            `changeImage: imageOrImageContainerId: "${imageInfo.imageId}" not found`
+        );
+    }
     // I can't remember why, but what this is doing is saying that if the imageContainer
     // has an <img> element, we're setting the src on that. But if it does not, we're
     // setting the background-image on the container itself.
-    const img = container.getElementsByTagName("img")[0];
-    const target = img || container;
-    if (img) {
-        img.setAttribute("src", imageInfo.src);
-    } else {
-        container.setAttribute(
+    if (imgOrImageContainer.tagName === "IMG") {
+        (imgOrImageContainer as HTMLImageElement).src = imageInfo.src;
+    }
+    // else if it has class bloom-imageContainer, we need to set the background-image on the container
+    else if (imgOrImageContainer.classList.contains("bloom-imageContainer")) {
+        imgOrImageContainer.setAttribute(
             "style",
             "background-image:url('" + imageInfo.src + "')"
         );
     }
-    target.setAttribute("data-copyright", imageInfo.copyright);
-    target.setAttribute("data-creator", imageInfo.creator);
-    target.setAttribute("data-license", imageInfo.license);
+    imgOrImageContainer.setAttribute("data-copyright", imageInfo.copyright);
+    imgOrImageContainer.setAttribute("data-creator", imageInfo.creator);
+    imgOrImageContainer.setAttribute("data-license", imageInfo.license);
 }
 
 // This origami checking business is related BL-13120
@@ -1319,6 +1293,9 @@ export function pageSelectionChanging() {
     }
 }
 
+// Caution: We don't want this to become an async method because we don't want
+// any other event handlers running between cleaning up the page and
+// getting the content to save. (Or think hard before changing that.)
 export function getBodyContentForSavePage() {
     if (hadOrigamiWhenWeLoadedThePage && !hasOrigami(document.body)) {
         throw new Error(

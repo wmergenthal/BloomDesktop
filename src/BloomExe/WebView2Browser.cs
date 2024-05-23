@@ -510,18 +510,14 @@ namespace Bloom
 
         public override string Url => _webview.Source.ToString();
 
-        public override Bitmap CapturePreview_Synchronous_Dangerous()
+        public override async Task<Bitmap> CapturePreview()
         {
             var stream = new MemoryStream();
-            var task = _webview.CoreWebView2.CapturePreviewAsync(
+            await _webview.CoreWebView2.CapturePreviewAsync(
                 CoreWebView2CapturePreviewImageFormat.Png,
                 stream
             );
-            while (!task.IsCompleted)
-            {
-                Application.DoEvents();
-                Thread.Sleep(10);
-            }
+
             stream.Position = 0;
             return new Bitmap(stream);
         }
@@ -614,6 +610,16 @@ namespace Bloom
         public override async Task RunJavascriptAsync(string script)
         {
             await _webview.ExecuteScriptAsync(script);
+        }
+
+        /// <summary>
+        /// Run a javascript script asynchronously.
+        /// This version of the method simply makes it explicit that we are purposefully not awaiting the result.
+        /// Therefore the script likely has not finished executing by the time the method returns.
+        /// </summary>
+        public override void RunJavascriptFireAndForget(string script)
+        {
+            _webview.ExecuteScriptAsync(script);
         }
 
         public override async Task<string> GetStringFromJavascriptAsync(string script)
