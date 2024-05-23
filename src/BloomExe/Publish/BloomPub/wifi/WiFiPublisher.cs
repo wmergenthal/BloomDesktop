@@ -58,14 +58,14 @@ namespace Bloom.Publish.BloomPub.wifi
             // Here, the Desktop side will need receiving code that speaks TCP.
             // Seems like the biggest change will be to replace BloomReaderUDPListener with
             // something that acts as similarly as possible but uses TCP instead of UDP.
-            // Maybe call it BloomReaderTCPListener?
+            // Call it BloomReaderTCPListener for commonality with the existing One for UDP.
 
             // This listens for a BloomReader to request a book.
             // It requires a firewall hole allowing Bloom to receive messages on _portToListen.
             // We initialize it before starting the Advertiser to avoid any chance of a race condition
             // where a BloomReader manages to request an advertised book before we start the listener.
             //Debug.WriteLine("WM, WiFiPublisher::Start, creating BloomReaderUDPListener"); // WM, temporary
-            //_wifiListener = new BloomReaderUDPListener();
+            //_wifiListener = new BloomReaderUDPListener(); ***BRING THIS BACK TO COEXIST WITH TCP LISTENER***
             Debug.WriteLine("WM, WiFiPublisher::Start, creating BloomReaderTCPListener"); // WM, temporary
             _wifiListener = new BloomReaderTCPListener();
             Debug.WriteLine("WM, WiFiPublisher::Start, BloomReaderTCPListener created"); // WM, temporary

@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.Drawing.Text;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -70,6 +71,10 @@ namespace Bloom.Publish.BloomPub.wifi
                 endpoint = socket.LocalEndPoint as IPEndPoint;
                 Debug.WriteLine("WM, TCP-listener, IPv4 address = " + endpoint.Address.ToString()); // WM, temporary
             }
+
+            // WM TEMPORARY, JUST TO WORK OUT SCOPE
+            string temptest = WiFiAdvertiser.GetLocalIpAddress2();
+            Debug.WriteLine("WM, TCP-listener, temptest = " + temptest);
 
             // Now can create the local endpoint and socket, using the tested IP address.
             Debug.WriteLine("WM, TCP-listener, creating listener on " + endpoint.Address.ToString()); // WM, temporary

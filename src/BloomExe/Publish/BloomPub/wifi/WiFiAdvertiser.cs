@@ -16,6 +16,12 @@ namespace Bloom.Publish.BloomPub.wifi
     /// </summary>
     public class WiFiAdvertiser : IDisposable
     {
+        public static string GetLocalIpAddress2()
+        //public string GetLocalIpAddress2()
+        {
+            return "bogus";
+        }
+
         // The information we will advertise.
         public string BookTitle;
         private string _bookVersion;
@@ -28,7 +34,7 @@ namespace Bloom.Publish.BloomPub.wifi
                 _bookVersion = value;
                 // In case this gets modified after we start advertising, we need to recompute the advertisement
                 // next time we send it. Clearing this makes sure it happens.
-                _currentIpAddress = "";
+                _cachedIpAddress = "";
             }
         }
         public string TitleLanguage;
@@ -43,6 +49,7 @@ namespace Bloom.Publish.BloomPub.wifi
         // but nothing between 5900 and 5931. Decided to use a number similar to ChorusHub.
         private const int Port = 5913; // must match port in BloomReader NewBookListenerService.startListenForUDPBroadcast
         private string _currentIpAddress;
+        private string _cachedIpAddress;
         private byte[] _sendBytes; // Data we send in each advertisement packet
         private readonly WebSocketProgress _progress;
 
@@ -80,7 +87,7 @@ namespace Bloom.Publish.BloomPub.wifi
                     if (!Paused)
                     {
                         UpdateAdvertisementBasedOnCurrentIpAddress();
-                        Debug.WriteLine("WM, WiFiAdvertiser::Work, sending"); // WM, temporary
+                        Debug.WriteLine("WM, WiFiAdvertiser::Work, broadcasting advert ({0} bytes)", _sendBytes.Length); // WM, temporary
                         _client.BeginSend(
                             _sendBytes,
                             _sendBytes.Length,
@@ -117,11 +124,13 @@ namespace Bloom.Publish.BloomPub.wifi
         /// </summary>
         private void UpdateAdvertisementBasedOnCurrentIpAddress()
         {
-            //Debug.WriteLine("WM, WiFiAdvertiser::UABOCIA, begin, _currentIpAddress = " + _currentIpAddress); // WM, temporary
-            if (_currentIpAddress != GetLocalIpAddress())
-            {
-                _currentIpAddress = GetLocalIpAddress();
-                //Debug.WriteLine("WM, WiFiAdvertiser::UABOCIA, updated, _currentIpAddress = " + _currentIpAddress); // WM, temporary
+            Debug.WriteLine("WM, WiFiAdvertiser::UABOCIA, begin, _cachedIpAddress = " + _cachedIpAddress); // WM, temporary
+            //if (_currentIpAddress != GetLocalIpAddress())
+            _currentIpAddress = GetIpAddressOfNetworkIface();
+            if (_cachedIpAddress != _currentIpAddress)
+                {
+                //_currentIpAddress = GetLocalIpAddress();
+                _cachedIpAddress = _currentIpAddress;
                 dynamic advertisement = new DynamicJson();
                 advertisement.title = BookTitle;
                 advertisement.version = BookVersion;
@@ -140,11 +149,6 @@ namespace Bloom.Publish.BloomPub.wifi
         /// Early experiments indicate that things work whichever one is used, assuming the networks are connected.
         /// Eventually we may want to prefer WiFi if available (see code in HearThis), or even broadcast on all of them.
         ///
-        /// See https://stackoverflow.com/questions/6803073/get-local-ip-address/27376368#27376368 for a way
-        /// to determine which of potentially multiple IP addresses will be the one used. The technique is used
-        /// successfully in BloomReaderTCPListener::ListenForTCPMessages(), whose development was done with a
-        /// laptop that had 9 IP addresses (comprising a mix of IPv4 and IPv6). In that development the function
-        /// below always returned an address different from the one actually being used.
         /// </summary>
         /// <returns></returns>
         private string GetLocalIpAddress()
@@ -169,6 +173,28 @@ namespace Bloom.Publish.BloomPub.wifi
             }
             Debug.WriteLine("WM, WiFiAdvertiser::GetLocalIpAddress, returning localIp = " + localIp); // WM, temporary
             return localIp ?? "Could not determine IP Address!";
+        }
+
+        // We need the IP address of *this* (the local) machine. Since a machine running BloomDesktop can have
+        // multiple IP addresses (mine has 9, a mix of both IPv4 and IPv6), we must be judicious in selecting the
+        // one that will actually be used by network interface. Unfortunately, GetLocalIpAddress() does not always
+        // return the correct address.
+        // BloomReaderTCPListener.ListenForTCPMessages() implementes a mechanims that does. That code provides the
+        // basis for this function, and also describes how the mechanism works.
+        // This function is static so that other code can use it too (I thought at first that ListenForTCPMessages()
+        // could call it, but not so - it needs a more complex return type). Future code, which must be in namespace
+        // 'Bloom.Publish.BloomPub.wifi') could call into here like this:
+        //      string ipAddr = WiFiAdvertiser.GetIpAddressOfNetworkIface();
+        public static string GetIpAddressOfNetworkIface()
+        {
+            IPEndPoint endpoint;
+            using (Socket socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, 0))
+            {
+                socket.Connect("8.8.8.8", 65530);  // Google's public DNS service
+                endpoint = socket.LocalEndPoint as IPEndPoint;
+            }
+            Debug.WriteLine("WM, WiFiAdvertiser::GetIpAddressOfNetworkIface, IPv4 address = " + endpoint.Address.ToString()); // WM, temporary
+            return endpoint.Address.ToString();
         }
 
         public void Stop()
