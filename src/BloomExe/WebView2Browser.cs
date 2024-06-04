@@ -197,6 +197,8 @@ namespace Bloom
         private static string _uiLanguageOfThisRun;
         private static bool _alreadyOpenedAWebView2Instance;
 
+        static int dataFolderCounter = 0;
+
         private async void InitWebView()
         {
             // based on https://stackoverflow.com/questions/63404822/how-to-disable-cors-in-wpf-webview2
@@ -288,10 +290,20 @@ namespace Bloom
             // And it should always be a short name using simple ASCII characters, which might help.
             // I don't think this is ever called before the server chooses a port, but just in case, I'm providing a default
             // that won't match any port we actually use.
-            var dataFolder = Path.Combine(
-                Path.GetTempPath(),
-                "Bloom WV2-" + (BloomServer.portForHttp == 0 ? 8085 : BloomServer.portForHttp)
-            );
+            // We had some problems that seemed to possibly related to the folder being left in a bad state, or
+            // different instances of WebView2 using the same one, so we decided to make sure it is uniqiue.
+            // Enhance: it might be a good thing to try to delete this folder if we find it already exists (on a background thread).
+            // For now we'll just keep incrementing until we find an available folder.
+            string dataFolder;
+            do
+            {
+                dataFolder = Path.Combine(
+                    Path.GetTempPath(),
+                    "Bloom WV2-"
+                        + (BloomServer.portForHttp == 0 ? 8085 : BloomServer.portForHttp)
+                        + dataFolderCounter++
+                );
+            } while (Directory.Exists(dataFolder));
             var env = await CoreWebView2Environment.CreateAsync(
                 browserExecutableFolder: AlternativeWebView2Path,
                 userDataFolder: dataFolder,
@@ -526,61 +538,6 @@ namespace Bloom
         {
             var html = await GetStringFromJavascriptAsync("document.documentElement.outerHTML");
             RobustFile.WriteAllText(path, html, Encoding.UTF8);
-        }
-
-        /// <summary>
-        /// The Javascript sent to this message must post a string result to common/javascriptResult.
-        /// This methods waits for that result to appear (repeatedly sleeping the UI thread until it does).
-        /// If it does not appear within 10 seconds, a TimeoutException is thrown.
-        /// Beware of allowing the Javascript called to send requests to our server that need the UI thread!
-        /// It is blocked while we are waiting for the result.
-        /// </summary>
-        /// <remarks>
-        /// This is very ugly. We tried many alternatives.
-        /// - If we keep the Task returned by ExecuteScriptAsync and repeatedly sleep waiting for it to be
-        /// completed, it never happens. It's necessary for messages to be pumped on the UI thread for
-        /// the completion to be signaled.
-        /// - Running the script on any other thread throws immediately.
-        /// - We tried using Application.DoEvents() in a loop until the Task was completed, and that
-        /// usually works. However, DoEvents() can pump other messages and cause reentrancy, which may
-        /// have been responsible for BL-13120.
-        /// - We started to try to get the results by making the method async. This requires changing
-        /// a great deal of code, because every calling method back to primary event handlers must be
-        /// async also. Furthermore, we have not yet found a technique to Invoke an async method when
-        /// Javascript needs to be run with a result from a background thread, such as an API call or
-        /// creating a publication. Moreover, I am worried that messages pumped by the main event
-        /// loop while waiting for the continuation of an awaited task could cause effects similar
-        /// to reentrancy.
-        /// Warning: so far, this technique seems reliable with a fully operational WebView2 that is
-        /// part of our UI. It does not work reliably with a WebView2 that is created temporarily
-        /// just to run a script and then destroyed. See experiment on JohnT's branch fixBloomPubJs.
-        /// </remarks>
-        public override string RunJavascriptThatPostsStringResultSync(string script)
-        {
-            CommonApi.JavascriptResult = null;
-            _webview.ExecuteScriptAsync(script);
-
-            for (int i = 0; i < 200; i++) // 10 seconds
-            {
-                if (CommonApi.JavascriptResult != null)
-                    break;
-                Thread.Sleep(50);
-            }
-            if (CommonApi.JavascriptResult == null)
-            {
-                Logger.WriteEvent(
-                    "RunJavascriptThatPostsStringResultSync: Timed out waiting for script to complete"
-                );
-                throw new TimeoutException(
-                    "RunJavascriptThatPostsStringResultSync: Timed out waiting for script to complete"
-                );
-            }
-            if (CommonApi.JavascriptResult.StartsWith("ERROR"))
-            {
-                throw new ApplicationException(CommonApi.JavascriptResult);
-            }
-
-            return CommonApi.JavascriptResult;
         }
 
         public override string RunJavascriptWithStringResult_Sync_Dangerous(string script)
