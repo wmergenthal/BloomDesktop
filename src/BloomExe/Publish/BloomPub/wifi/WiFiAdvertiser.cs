@@ -122,7 +122,7 @@ namespace Bloom.Publish.BloomPub.wifi
             _currentIpAddress = GetIpAddressOfNetworkIface();
             if (_cachedIpAddress != _currentIpAddress)
             {
-                _cachedIpAddress = _currentIpAddress;   // cache updated address
+                _cachedIpAddress = _currentIpAddress;   // save snapshot of our new IP address
                 dynamic advertisement = new DynamicJson();
                 advertisement.title = BookTitle;
                 advertisement.version = BookVersion;
