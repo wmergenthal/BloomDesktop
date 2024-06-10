@@ -958,6 +958,13 @@ namespace Bloom.Edit
         {
             try
             {
+                if (page == null)
+                {
+                    // bizarre, but in some error recovery situations the page we were on before the crash might
+                    // no longer exist. In that case, just go to the first page.
+                    page = CurrentBook.FirstPage;
+                }
+
                 _pageSelection.SelectPage(page);
                 Logger.WriteMinorEvent("changing page selection");
                 Analytics.Track("Select Page"); //not "edit page" because at the moment we don't have the capability of detecting that.
@@ -1511,6 +1518,9 @@ namespace Bloom.Edit
         /// Returns true if we're in a valid state to save, false if we're not. In the latter case, doAfterSaving
         /// will not be called (even later).
         /// </summary>
+        /// <remarks>If you are doing this in an API handler, remember that you must retrieve any data in
+        /// the request before calling SaveThen. The Request object can't be used in side the doAfterSaving function,
+        /// since by then the request has been marked completed.</remarks>
         public void SaveThen(
             Func<string> doAfterSaving,
             Action doIfNotInRightStateToSave,

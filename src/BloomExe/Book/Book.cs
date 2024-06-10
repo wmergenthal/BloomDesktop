@@ -1694,6 +1694,7 @@ namespace Bloom.Book
             // already been done, so they must be called in exactly this order.
             Storage.MigrateMaintenanceLevels();
             Storage.MigrateToMediaLevel1ShrinkLargeImages();
+            Storage.MigrateToLevel2RemoveTransparentComicalSvgs();
             Storage.MigrateToLevel3PutImgFirst();
             Storage.MigrateToLevel4UseAppearanceSystem();
 
@@ -3403,11 +3404,7 @@ namespace Bloom.Book
         {
             //review: could move to page
             var pageElement = OurHtmlDom.RawDom.SelectSingleNodeHonoringDefaultNS(page.XPathToDiv);
-            var outer = pageElement.OuterXml;
-            var oldInner = pageElement.InnerXml;
             Require.That(pageElement != null, "Page could not be found: " + page.XPathToDiv);
-
-            pageElement.InnerXml = XmlHtmlConverter.RemoveEmptySelfClosingTags(oldInner);
 
             return pageElement as XmlElement;
         }

@@ -390,6 +390,10 @@ export function changeImage(imageInfo: {
     imgOrImageContainer.setAttribute("data-copyright", imageInfo.copyright);
     imgOrImageContainer.setAttribute("data-creator", imageInfo.creator);
     imgOrImageContainer.setAttribute("data-license", imageInfo.license);
+    const ancestor = imgOrImageContainer.parentElement?.parentElement;
+    if (ancestor) {
+        SetOverlayForImagesWithoutMetadata(ancestor);
+    }
 }
 
 // This origami checking business is related BL-13120
@@ -415,14 +419,6 @@ export function SetupElements(container: HTMLElement) {
     SetupWidgetEditing(container);
     initializeBubbleManager();
 
-    //add a marginBox if it's missing. We introduced it early in the first beta
-    $(container)
-        .find(".bloom-page")
-        .each(function() {
-            if ($(this).find(".marginBox").length === 0) {
-                $(this).wrapInner("<div class='marginBox'></div>");
-            }
-        });
     $(container)
         .find(".bloom-editable")
         .each(function() {
