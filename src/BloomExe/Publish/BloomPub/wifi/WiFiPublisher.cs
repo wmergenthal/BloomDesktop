@@ -23,9 +23,11 @@ namespace Bloom.Publish.BloomPub.wifi
         private readonly BookServer _bookServer;
         private readonly WebSocketProgress _progress;
         private WiFiAdvertiser _wifiAdvertiser;
-        //private BloomReaderUDPListener _wifiListener;
-        private BloomReaderTCPListener _wifiListener;
+        private BloomReaderUDPListener _wifiListenerUDP;
+        private BloomReaderTCPListener _wifiListenerTCP;
         public const string ProtocolVersion = "2.0";
+        //public const string ProtocolVersion = "1.9";  // WM, experiment
+        //public const string ProtocolVersion = "3.0";  // WM, experiment
 
         // This is the web client we use in StartSendBookToClientOnLocalSubNet() to send a book to an android.
         // It is non-null only for the duration of a send, being destroyed in its own UploadDataCompleted
@@ -54,40 +56,45 @@ namespace Bloom.Publish.BloomPub.wifi
                 Stop();
             }
 
-            // WM - experiment: change Reader's reply to UDP advertisement from UDP to TCP.
-            // Here, the Desktop side will need receiving code that speaks TCP.
-            // Seems like the biggest change will be to replace BloomReaderUDPListener with
-            // something that acts as similarly as possible but uses TCP instead of UDP.
-            // Call it BloomReaderTCPListener for commonality with the existing One for UDP.
-
             // This listens for a BloomReader to request a book.
             // It requires a firewall hole allowing Bloom to receive messages on _portToListen.
             // We initialize it before starting the Advertiser to avoid any chance of a race condition
             // where a BloomReader manages to request an advertised book before we start the listener.
-            //Debug.WriteLine("WM, WiFiPublisher::Start, creating BloomReaderUDPListener"); // WM, temporary
-            //_wifiListener = new BloomReaderUDPListener(); ***BRING THIS BACK TO COEXIST WITH TCP LISTENER***
-            Debug.WriteLine("WM, WiFiPublisher::Start, creating BloomReaderTCPListener"); // WM, temporary
-            _wifiListener = new BloomReaderTCPListener();
-            Debug.WriteLine("WM, WiFiPublisher::Start, BloomReaderTCPListener created"); // WM, temporary
-            _wifiListener.NewMessageReceived += (sender, args) =>
+
+            // WM: Reader's reply to Desktop's UDP advertisement is changing from UDP to TCP.
+            // Desktop side (here) needs receiving code that speaks TCP; this is done with the
+            // new class BloomReaderTCPListener. It acts just like BloomReaderUDPListener, but
+            // does so using TCP instead of UDP.
+            //
+            // Desktop should (we think) also accommodate older Readers that still use UDP. Thus
+            // we support *both* reply types, and retain existing class BloomReaderUDPListener
+            // as a peer of the new BloomReaderTCPListener. Replies of either type will be seen
+            // and processed.
+
+            // Create and start the UDP listener. It runs in its own thread.
+            _wifiListenerUDP = new BloomReaderUDPListener();
+            Debug.WriteLine("WM, WiFiPublisher::Start, _wifiListenerUDP created"); // WM, temporary
+            _wifiListenerUDP.NewMessageReceived += (sender, args) =>
             {
                 var json = Encoding.UTF8.GetString(args.Data);
                 try
                 {
                     dynamic settings = JsonConvert.DeserializeObject(json);
+
                     // The property names used here must match the ones in BloomReader, doInBackground method of SendMessage,
                     // a private class of NewBookListenerService.
                     var androidIpAddress = (string)settings.deviceAddress;
-                    Debug.WriteLine("WM, WiFiPublisher::Start, got androidIpAddress = " + androidIpAddress); // WM, temporary
-
+                    Debug.WriteLine("WM, WiFiPublisher::Start, UDP, got androidIpAddress = " + androidIpAddress); // WM, temporary
                     var androidName = (string)settings.deviceName;
-                    Debug.WriteLine("WM, WiFiPublisher::Start, got androidName = " + androidName); // WM, temporary
+                    Debug.WriteLine("WM, WiFiPublisher::Start, UDP, got androidName = " + androidName); // WM, temporary
+
                     // This prevents the device (or other devices) from queuing up requests while we're busy with this one.
                     // In effect, the Android is only allowed to request a retry after we've given up this try at sending.
                     // Of course, there are async effects from network latency. But if we do get another request while
                     // handling this one, we will ignore it, since StartSendBook checks for a transfer in progress.
                     _wifiAdvertiser.Paused = true;
-                    Debug.WriteLine("WM, WiFiPublisher::Start, calling StartSendBookOverWiFi()"); // WM, temporary
+
+                    Debug.WriteLine("WM, WiFiPublisher::Start, UDP, calling StartSendBookOverWiFi()"); // WM, temporary
                     StartSendBookOverWiFi(
                         book,
                         androidIpAddress,
@@ -102,7 +109,60 @@ namespace Bloom.Publish.BloomPub.wifi
                 catch (Exception ex)
                     when (ex is JsonReaderException || ex is JsonSerializationException)
                 {
-                    Debug.WriteLine("WM, WiFiPublisher::Start, exception " + ex); // WM, temporary
+                    Debug.WriteLine("WM, WiFiPublisher::Start, UDP, exception " + ex); // WM, temporary
+                    _progress.Message(
+                        idSuffix: "BadBookRequest",
+                        message: "Got a book request we could not process. Possibly the device is running an incompatible version of BloomReader?",
+                        progressKind: ProgressKind.Error
+                    );
+
+                    //this is too technical/hard to translate
+                    _progress.MessageWithoutLocalizing(
+                        $" Request contains {json}; trying to interpret as JSON we got {ex.Message}",
+                        kind: ProgressKind.Error
+                    );
+                }
+            };
+
+            // Create and start the TCP listener. It runs in its own thread.
+            _wifiListenerTCP = new BloomReaderTCPListener();
+            Debug.WriteLine("WM, WiFiPublisher::Start, _wifiListenerTCP created"); // WM, temporary
+            _wifiListenerTCP.NewMessageReceived += (sender, args) =>
+            {
+                var json = Encoding.UTF8.GetString(args.Data);
+                try
+                {
+                    dynamic settings = JsonConvert.DeserializeObject(json);
+
+                    // The property names used here must match the ones in BloomReader, doInBackground method of SendMessage,
+                    // a private class of NewBookListenerService.
+                    var androidIpAddress = (string)settings.deviceAddress;
+                    Debug.WriteLine("WM, WiFiPublisher::Start, TCP, got androidIpAddress = " + androidIpAddress); // WM, temporary
+                    var androidName = (string)settings.deviceName;
+                    Debug.WriteLine("WM, WiFiPublisher::Start, TCP, got androidName = " + androidName); // WM, temporary
+
+                    // This prevents the device (or other devices) from queuing up requests while we're busy with this one.
+                    // In effect, the Android is only allowed to request a retry after we've given up this try at sending.
+                    // Of course, there are async effects from network latency. But if we do get another request while
+                    // handling this one, we will ignore it, since StartSendBook checks for a transfer in progress.
+                    _wifiAdvertiser.Paused = true;
+
+                    Debug.WriteLine("WM, WiFiPublisher::Start, TCP, calling StartSendBookOverWiFi()"); // WM, temporary
+                    StartSendBookOverWiFi(
+                        book,
+                        androidIpAddress,
+                        androidName,
+                        backColor,
+                        publishSettings
+                    );
+                    // Returns immediately. But we don't resume advertisements until the async send completes.
+                }
+                // If there's something wrong with the JSON (maybe an obsolete or newer version of reader?)
+                // just ignore the request.
+                catch (Exception ex)
+                    when (ex is JsonReaderException || ex is JsonSerializationException)
+                {
+                    Debug.WriteLine("WM, WiFiPublisher::Start, TCP, exception " + ex); // WM, temporary
                     _progress.Message(
                         idSuffix: "BadBookRequest",
                         message: "Got a book request we could not process. Possibly the device is running an incompatible version of BloomReader?",
@@ -153,7 +213,7 @@ namespace Bloom.Publish.BloomPub.wifi
         {
             // Locked to avoid contention with code in the thread that reports a transfer complete,
             // which disposes of _wifiSender and tries to restart the advertiser.
-            Debug.WriteLine("WM, WiFiPublisher::Stop, taking lock-A"); // WM, temporary
+            Debug.WriteLine("WM, WiFiPublisher::Stop, nuke stuff"); // WM, temporary
             lock (this)
             {
                 if (_wifiAdvertiser != null)
@@ -166,16 +226,17 @@ namespace Bloom.Publish.BloomPub.wifi
                 if (_wifiSender != null)
                 {
                     _wifiSender.CancelAsync();
-                    Debug.WriteLine("attempting async cancel send");
+                    //Debug.WriteLine("attempting async cancel send");
+                    Debug.WriteLine("WM, WiFiPublisher::Stop, stopping _wifiSender"); // WM, temporary
                 }
                 if (_uploadTimer != null)
                 {
+                    Debug.WriteLine("WM, WiFiPublisher::Stop, deleting _uploadTimer"); // WM, temporary
                     _uploadTimer.Stop();
                     _uploadTimer.Dispose();
                     _uploadTimer = null;
                 }
             }
-            Debug.WriteLine("WM, WiFiPublisher::Stop, exited locked section-A"); // WM, temporary
             // To avoid leaving a thread around when quitting, try to wait for the sender to cancel or complete.
             // We expect another thread to set _wifiSender to null in the UploadDataCompleted event
             // (which is supposed to be triggered also by canceling).
@@ -183,7 +244,6 @@ namespace Bloom.Publish.BloomPub.wifi
             {
                 Thread.Sleep(100);
             }
-            Debug.WriteLine("WM, WiFiPublisher::Stop, taking lock-B"); // WM, temporary
             lock (this)
             {
                 if (_wifiSender != null)
@@ -197,18 +257,24 @@ namespace Bloom.Publish.BloomPub.wifi
                     // the thread won't outlive the application by much. Not allowing requests to queue
                     // up is one thing that helps. At worst there's only one in progress that either
                     // finishes or aborts before too long.)
+                    Debug.WriteLine("WM, WiFiPublisher::Stop, deleting _wifiSender"); // WM, temporary
                     _wifiSender.Dispose();
                     _wifiSender = null;
-                    Debug.WriteLine("had to force dispose sender");
+                    //Debug.WriteLine("had to force dispose sender");
                 }
             }
-            Debug.WriteLine("WM, WiFiPublisher::Stop, exited locked section-B"); // WM, temporary
-            if (_wifiListener != null)
+
+            if (_wifiListenerUDP != null)
             {
-                {
-                    _wifiListener.StopListener();
-                    _wifiListener = null;
-                }
+                Debug.WriteLine("WM, WiFiPublisher::Stop, deleting _wifiListenerUDP"); // WM, temporary
+                _wifiListenerUDP.StopListener();
+                _wifiListenerUDP = null;
+            }
+            if (_wifiListenerTCP != null)
+            {
+                Debug.WriteLine("WM, WiFiPublisher::Stop, deleting _wifiListenerTCP"); // WM, temporary
+                _wifiListenerTCP.StopListener();
+                _wifiListenerTCP = null;
             }
         }
 

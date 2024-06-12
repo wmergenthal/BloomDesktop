@@ -126,17 +126,17 @@ namespace Bloom.Publish.BloomPub.wifi
 
         public void StopListener()
         {
-            Debug.WriteLine("WM, StopListener, called"); // WM, temporary
+            Debug.WriteLine("WM, TCP-StopListener, called"); // WM, temporary
             if (_listening) {
                 _listening = false;
             }
 
             if (_listeningThread == null) {
-                Debug.WriteLine("WM, StopListener, _listeningThread null, bail"); // WM, temporary
+                Debug.WriteLine("WM, TCP-StopListener, _listeningThread null, bail"); // WM, temporary
                 return;
             }
 
-            Debug.WriteLine("WM, StopListener, stopping and deleting _listeningThread"); // WM, temporary
+            Debug.WriteLine("WM, TCP-StopListener, stopping and deleting _listeningThread"); // WM, temporary
             _listeningThread.Abort();
             _listeningThread.Join(2 * 1000);
             _listeningThread = null;
