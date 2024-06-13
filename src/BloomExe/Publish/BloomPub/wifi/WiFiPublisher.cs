@@ -12,6 +12,7 @@ using Bloom.web;
 using L10NSharp;
 using Newtonsoft.Json;
 using SIL.IO;
+using static System.Windows.Forms.VisualStyles.VisualStyleElement.TaskbarClock;
 
 namespace Bloom.Publish.BloomPub.wifi
 {
@@ -28,6 +29,8 @@ namespace Bloom.Publish.BloomPub.wifi
         public const string ProtocolVersion = "2.0";
         //public const string ProtocolVersion = "1.9";  // WM, experiment
         //public const string ProtocolVersion = "3.0";  // WM, experiment
+        private static Mutex wifiPublishMutex;
+        private int mutexWaitTimeMsec = 60000;   // 1 minute; long enough?
 
         // This is the web client we use in StartSendBookToClientOnLocalSubNet() to send a book to an android.
         // It is non-null only for the duration of a send, being destroyed in its own UploadDataCompleted
@@ -55,6 +58,8 @@ namespace Bloom.Publish.BloomPub.wifi
                 Debug.WriteLine("WM, WiFiPublisher::Start, null _wifiAdvertiser, stopping"); // WM, temporary
                 Stop();
             }
+
+            wifiPublishMutex = new Mutex();
 
             // This listens for a BloomReader to request a book.
             // It requires a firewall hole allowing Bloom to receive messages on _portToListen.
@@ -94,7 +99,9 @@ namespace Bloom.Publish.BloomPub.wifi
                     // handling this one, we will ignore it, since StartSendBook checks for a transfer in progress.
                     _wifiAdvertiser.Paused = true;
 
-                    Debug.WriteLine("WM, WiFiPublisher::Start, UDP, calling StartSendBookOverWiFi()"); // WM, temporary
+                    // Only allow one listener at a time to send a book.
+                    wifiPublishMutex.WaitOne(mutexWaitTimeMsec);
+                    Debug.WriteLine("WM, WiFiPublisher::Start, UDP, got mutex, calling StartSendBookOverWiFi()"); // WM, temporary
                     StartSendBookOverWiFi(
                         book,
                         androidIpAddress,
@@ -102,6 +109,9 @@ namespace Bloom.Publish.BloomPub.wifi
                         backColor,
                         publishSettings
                     );
+                    wifiPublishMutex.ReleaseMutex();
+                    Debug.WriteLine("WM, WiFiPublisher::Start, UDP, released mutex");
+
                     // Returns immediately. But we don't resume advertisements until the async send completes.
                 }
                 // If there's something wrong with the JSON (maybe an obsolete or newer version of reader?)
@@ -147,7 +157,9 @@ namespace Bloom.Publish.BloomPub.wifi
                     // handling this one, we will ignore it, since StartSendBook checks for a transfer in progress.
                     _wifiAdvertiser.Paused = true;
 
-                    Debug.WriteLine("WM, WiFiPublisher::Start, TCP, calling StartSendBookOverWiFi()"); // WM, temporary
+                    // Only allow one listener at a time to send a book.
+                    wifiPublishMutex.WaitOne(mutexWaitTimeMsec);
+                    Debug.WriteLine("WM, WiFiPublisher::Start, TCP, got mutex, calling StartSendBookOverWiFi()"); // WM, temporary
                     StartSendBookOverWiFi(
                         book,
                         androidIpAddress,
@@ -155,6 +167,9 @@ namespace Bloom.Publish.BloomPub.wifi
                         backColor,
                         publishSettings
                     );
+                    wifiPublishMutex.ReleaseMutex();
+                    Debug.WriteLine("WM, WiFiPublisher::Start, TCP, released mutex");
+
                     // Returns immediately. But we don't resume advertisements until the async send completes.
                 }
                 // If there's something wrong with the JSON (maybe an obsolete or newer version of reader?)
