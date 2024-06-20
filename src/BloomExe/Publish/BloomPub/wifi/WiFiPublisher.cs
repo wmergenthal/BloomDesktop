@@ -79,7 +79,7 @@ namespace Bloom.Publish.BloomPub.wifi
             // Create and start the UDP listener. It runs in its own thread.
             _wifiListenerUDP = new BloomReaderUDPListener();
             Debug.WriteLine("WM, WiFiPublisher::Start, _wifiListenerUDP created"); // WM, temporary
-            _wifiListenerUDP.NewMessageReceived += (sender, args) =>
+            _wifiListenerUDP.NewMessageReceivedUDP += (sender, args) =>
             {
                 var json = Encoding.UTF8.GetString(args.Data);
                 try
@@ -98,8 +98,10 @@ namespace Bloom.Publish.BloomPub.wifi
                     // Of course, there are async effects from network latency. But if we do get another request while
                     // handling this one, we will ignore it, since StartSendBook checks for a transfer in progress.
                     _wifiAdvertiser.Paused = true;
+                    Debug.WriteLine("WM, WiFiPublisher::Start, UDP, advertising is Paused");
 
                     // Only allow one listener at a time to send a book.
+                    Debug.WriteLine("WM, WiFiPublisher::Start, UDP, asking for mutex");
                     wifiPublishMutex.WaitOne(mutexWaitTimeMsec);
                     Debug.WriteLine("WM, WiFiPublisher::Start, UDP, got mutex, calling StartSendBookOverWiFi()"); // WM, temporary
                     StartSendBookOverWiFi(
@@ -137,7 +139,7 @@ namespace Bloom.Publish.BloomPub.wifi
             // Create and start the TCP listener. It runs in its own thread.
             _wifiListenerTCP = new BloomReaderTCPListener();
             Debug.WriteLine("WM, WiFiPublisher::Start, _wifiListenerTCP created"); // WM, temporary
-            _wifiListenerTCP.NewMessageReceived += (sender, args) =>
+            _wifiListenerTCP.NewMessageReceivedTCP += (sender, args) =>
             {
                 var json = Encoding.UTF8.GetString(args.Data);
                 try
@@ -156,8 +158,10 @@ namespace Bloom.Publish.BloomPub.wifi
                     // Of course, there are async effects from network latency. But if we do get another request while
                     // handling this one, we will ignore it, since StartSendBook checks for a transfer in progress.
                     _wifiAdvertiser.Paused = true;
+                    Debug.WriteLine("WM, WiFiPublisher::Start, TCP, advertising is Paused");
 
                     // Only allow one listener at a time to send a book.
+                    Debug.WriteLine("WM, WiFiPublisher::Start, TCP, asking for mutex");
                     wifiPublishMutex.WaitOne(mutexWaitTimeMsec);
                     Debug.WriteLine("WM, WiFiPublisher::Start, TCP, got mutex, calling StartSendBookOverWiFi()"); // WM, temporary
                     StartSendBookOverWiFi(
@@ -316,13 +320,16 @@ namespace Bloom.Publish.BloomPub.wifi
         {
             // Locked in case more than one thread at a time can handle incoming packets, though I don't think
             // this is true. Also, Stop() on the main thread cares whether _wifiSender is null.
-            Debug.WriteLine("WM, WiFiPublisher::SSBTCOLS, taking lock-A"); // WM, temporary
+            Debug.WriteLine("WM, WiFiPublisher::SSBTCOLS, asking for lock-A"); // WM, temporary
             lock (this)
             {
+                Debug.WriteLine("WM, WiFiPublisher::SSBTCOLS, took lock-A"); // WM, temporary
                 // We only support one send at a time. If we somehow get more than one request, we ignore the other.
                 // The device will retry soon if still listening and we are still advertising.
-                if (_wifiSender != null) // indicates transfer in progress
+                if (_wifiSender != null) {  // indicates transfer in progress
+                    Debug.WriteLine("WM, WiFiPublisher::SSBTCOLS, xfer in progress, returning"); // WM, temporary
                     return;
+                }
                 // now THIS transfer is 'in progress' as far as any thread checking this is concerned.
                 Debug.WriteLine("WM, WiFiPublisher::SSBTCOLS, creating WebClient for sending"); // WM, temporary
                 _wifiSender = new WebClient();
@@ -368,9 +375,10 @@ namespace Bloom.Publish.BloomPub.wifi
             // is different from the one we're advertising, update the advertisement, so at least subsequent
             // advertisements will conform to the version the device just got.
             _wifiAdvertiser.BookVersion = BloomPubMaker.HashOfMostRecentlyCreatedBook;
-            Debug.WriteLine("WM, WiFiPublisher::SSBTCOLS, taking lock-B"); // WM, temporary
+            Debug.WriteLine("WM, WiFiPublisher::SSBTCOLS, asking for lock-B"); // WM, temporary
             lock (this)
             {
+                Debug.WriteLine("WM, WiFiPublisher::SSBTCOLS, took lock-B"); // WM, temporary
                 // The UploadDataCompleted event handler quit working at Bloom 4.6.1238 Alpha (Windows test build).
                 // The data upload still works, but the event handler is *NEVER* called.  Trying to revise the upload
                 // by using UploadDataTaskAsync with async/await  did not work any better: the await never happened.
@@ -425,7 +433,10 @@ namespace Bloom.Publish.BloomPub.wifi
                     _wifiSender = null;
                 }
                 if (_wifiAdvertiser != null)
+                {
                     _wifiAdvertiser.Paused = false;
+                    Debug.WriteLine("WM, WiFiPublisher::WifiSenderUploadCompleted, advertising is Enabled");
+                }
                 if (_uploadTimer != null)
                 {
                     _uploadTimer.Stop();

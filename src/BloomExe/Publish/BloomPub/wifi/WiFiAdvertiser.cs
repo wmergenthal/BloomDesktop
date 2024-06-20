@@ -81,7 +81,7 @@ namespace Bloom.Publish.BloomPub.wifi
                     if (!Paused)
                     {
                         UpdateAdvertisementBasedOnCurrentIpAddress();
-                        Debug.WriteLine("WM, WiFiAdvertiser::Work, broadcasting advert ({0} bytes)", _sendBytes.Length); // WM, temporary
+                        Debug.WriteLine("WM, WiFiAdvertiser::Work, broadcasting advert ({0} bytes) on port {1}", _sendBytes.Length, Port); // WM, temporary
                         _client.BeginSend(
                             _sendBytes,
                             _sendBytes.Length,

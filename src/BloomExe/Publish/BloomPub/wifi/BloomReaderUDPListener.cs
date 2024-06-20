@@ -9,7 +9,7 @@ namespace Bloom.Publish.BloomPub.wifi
 {
     /// <summary>
     /// Helper class to listen for a single packet from the Android. Construct an instance to start
-    /// listening (on another thread); hook NewMessageReceived to receive a packet each time a client sends it.
+    /// listening (on another thread); hook NewMessageReceivedUDP to receive a packet each time a client sends it.
     /// </summary>
     class BloomReaderUDPListener
     {
@@ -17,7 +17,7 @@ namespace Bloom.Publish.BloomPub.wifi
         // and be different from WiFiAdvertiser.Port and port in BloomReaderPublisher.SendBookToWiFi
         private int _portToListen = 5915;
         Thread _listeningThread;
-        public event EventHandler<AndroidMessageArgs> NewMessageReceived;
+        public event EventHandler<AndroidMessageArgs> NewMessageReceivedUDP;
         UdpClient _listener = null;
         private bool _listening;
 
@@ -55,12 +55,12 @@ namespace Bloom.Publish.BloomPub.wifi
                 {
                     try
                     {
-                        Debug.WriteLine("WM, UDP-listener, waiting for packet..."); // WM, temporary
+                        Debug.WriteLine("WM, UDP-listener, waiting for packet on port " + _portToListen + "..."); // WM, temporary
                         byte[] bytes = _listener.Receive(ref groupEP); // waits for packet from Android.
 
                         //raise event
-                        Debug.WriteLine("WM, UDP-listener, got {0} bytes from Reader, raising \'NewMessageReceived\'", bytes.Length); // WM, temporary
-                        NewMessageReceived?.Invoke(this, new AndroidMessageArgs(bytes));
+                        Debug.WriteLine("WM, UDP-listener, got {0} bytes from Reader, raising \'NewMessageReceivedUDP\'", bytes.Length); // WM, temporary
+                        NewMessageReceivedUDP?.Invoke(this, new AndroidMessageArgs(bytes));
                     }
                     catch (SocketException se)
                     {

@@ -11,7 +11,7 @@ namespace Bloom.Publish.BloomPub.wifi
 {
     /// <summary>
     /// Helper class to listen for a TCP reply from the Android. Construct an instance to start
-    /// listening (on another thread). When a reply is detected, raise event NewMessageReceived
+    /// listening (on another thread). When a reply is detected, raise event NewMessageReceivedTCP
     /// to process it.
     /// </summary>
     class BloomReaderTCPListener
@@ -24,9 +24,9 @@ namespace Bloom.Publish.BloomPub.wifi
         //     https://www.geeksforgeeks.org/socket-programming-in-c-sharp/
         // This page also has an example TCP *client*, which benefits Bloom Reader.
 
-        private int _portToListen = 5915;
+        private int _portToListen = 5916;
         Thread _listeningThread;
-        public event EventHandler<AndroidMessageArgs> NewMessageReceived;
+        public event EventHandler<AndroidMessageArgs> NewMessageReceivedTCP;
         private bool _listening;
         private int _advertMaxLengthExpected = 512;  // WM, more than enough, yes?
 
@@ -70,7 +70,7 @@ namespace Bloom.Publish.BloomPub.wifi
             endpoint = socket.LocalEndPoint as IPEndPoint;
 
             // Now can create the local endpoint and socket, using the tested IP address.
-            Debug.WriteLine("WM, TCP-listener, creating listener on " + endpoint.Address.ToString()); // WM, temporary
+            Debug.WriteLine("WM, TCP-listener, creating listener on " + endpoint.Address.ToString() + ":" + _portToListen); // WM, temporary
             IPEndPoint localEndPoint = new IPEndPoint(endpoint.Address, _portToListen);
             Socket listener = new Socket(endpoint.Address.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
 
@@ -109,8 +109,8 @@ namespace Bloom.Publish.BloomPub.wifi
 
                     // Raise event for WiFiPublisher to notice and act on -- this is what
                     // actually gets the book sent to Reader.
-                    Debug.WriteLine("WM, TCP-listener, got {0} bytes from Reader, raising \'NewMessageReceived\'", inLen); // WM, temporary
-                    NewMessageReceived?.Invoke(this, new AndroidMessageArgs(inBuf));
+                    Debug.WriteLine("WM, TCP-listener, got {0} bytes from Reader, raising \'NewMessageReceivedTCP\'", inLen); // WM, temporary
+                    NewMessageReceivedTCP?.Invoke(this, new AndroidMessageArgs(inBuf));
 
                     // Close connection (actual book transfer is done elsewhere, by SyncServer).
                     clientSocket.Shutdown(SocketShutdown.Both);
