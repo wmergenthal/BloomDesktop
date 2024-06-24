@@ -70,7 +70,7 @@ namespace Bloom.Publish.BloomPub.wifi
             endpoint = socket.LocalEndPoint as IPEndPoint;
 
             // Now can create the local endpoint and socket, using the tested IP address.
-            Debug.WriteLine("WM, TCP-listener, creating listener on " + endpoint.Address.ToString() + ":" + _portToListen); // WM, temporary
+            Debug.WriteLine("WM, TCP-listener, creating listener on " + endpoint.Address.ToString()); // WM, temporary
             IPEndPoint localEndPoint = new IPEndPoint(endpoint.Address, _portToListen);
             Socket listener = new Socket(endpoint.Address.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
 
@@ -92,7 +92,7 @@ namespace Bloom.Publish.BloomPub.wifi
 
                 while (_listening)
                 {
-                    Debug.WriteLine("WM, TCP-listener, waiting for connection..."); // WM, temporary
+                    Debug.WriteLine("WM, TCP-listener, waiting for connection on port " + _portToListen + "..."); // WM, temporary
 
                     // Create socket and wait for new connection. Bind() and Listen()
                     // must have previously been called. This is a blocking call.

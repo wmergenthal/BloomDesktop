@@ -89,6 +89,12 @@ namespace Bloom.Publish.BloomPub.wifi
                             SendCallback,
                             _client
                         );
+
+                        // WM, VERY TEMPORARY, to test arbitration provided by the mutex.
+                        // Ensure that multiple Reader tablets respond to the same UDP advert by
+                        // guaranteeing that only one is ever broadcast.
+                        //Debug.WriteLine("WM, WiFiAdvertiser::Work, DID ONE UDP BROADCAST ADVERT, NO MORE");
+                        //break;
                     }
                     Debug.WriteLine("WM, WiFiAdvertiser::Work, 1-second sleep"); // WM, temporary
                     Thread.Sleep(1000);
