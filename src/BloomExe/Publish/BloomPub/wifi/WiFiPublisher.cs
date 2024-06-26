@@ -326,26 +326,27 @@ namespace Bloom.Publish.BloomPub.wifi
                 Debug.WriteLine("WM, WiFiPublisher::SSBTCOLS, took lock-A"); // WM, temporary
                 // We only support one send at a time. If we somehow get more than one request, we ignore the other.
                 // The device will retry soon if still listening and we are still advertising.
-                //if (_wifiSender != null) {  // indicates transfer in progress
-                //    Debug.WriteLine("WM, WiFiPublisher::SSBTCOLS, xfer in progress, returning"); // WM, temporary
-                //    return;
-                //}
-                // WM, EXPERIMENT
                 if (_wifiSender != null) {  // indicates transfer in progress
-                    int waitCount = 12;
-                    while (waitCount > 0) {
-                        Debug.WriteLine("WM, WiFiPublisher::SSBTCOLS, xfer in progress, wait 5-sec...");
-                        Thread.Sleep(5000);
-                        if (_wifiSender == null) {
-                            Debug.WriteLine("WM, WiFiPublisher::SSBTCOLS, xfer complete, proceed");
-                            break;
-                        }
-                        waitCount--;
-                        Debug.WriteLine("WM, WiFiPublisher::SSBTCOLS, xfer still ongoing, countdown = " + waitCount);
-                    }
-                    Debug.WriteLine("WM, WiFiPublisher::SSBTCOLS, waited but xfer still ongoing, bail");
+                    Debug.WriteLine("WM, WiFiPublisher::SSBTCOLS, xfer in progress, returning"); // WM, temporary
                     return;
                 }
+                // WM, test-only alternative for when adverts stop after just one, no 1-per-sec loop:
+                //if (_wifiSender != null) {  // indicates transfer in progress
+                //    int waitCount = 12;
+                //    while (waitCount > 0) {
+                //        Debug.WriteLine("WM, WiFiPublisher::SSBTCOLS, xfer in progress, wait 5-sec...");
+                //        Thread.Sleep(5000);
+                //        if (_wifiSender == null) {
+                //            Debug.WriteLine("WM, WiFiPublisher::SSBTCOLS, xfer complete, proceed");
+                //            break;
+                //        }
+                //        waitCount--;
+                //        Debug.WriteLine("WM, WiFiPublisher::SSBTCOLS, xfer still ongoing, countdown = " + waitCount);
+                //    }
+                //    Debug.WriteLine("WM, WiFiPublisher::SSBTCOLS, waited but xfer still ongoing, bail");
+                //    return;
+                //}
+
                 // now THIS transfer is 'in progress' as far as any thread checking this is concerned.
                 Debug.WriteLine("WM, WiFiPublisher::SSBTCOLS, creating WebClient for sending"); // WM, temporary
                 _wifiSender = new WebClient();
