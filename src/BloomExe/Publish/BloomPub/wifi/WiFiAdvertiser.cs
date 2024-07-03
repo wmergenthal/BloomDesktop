@@ -79,34 +79,11 @@ namespace Bloom.Publish.BloomPub.wifi
                 message: "Advertising book to Bloom Readers on local network..."
             );
 
-            // WM, Experiment 1 -- put up dialog with a QR code containing the same
-            // data being sent via UDP broadcast PLUS this machine's IP address.
-            // At first the dialog won't have all this; it will be primitive until
-            // I learn more.
-            //Debug.WriteLine("WM, WiFiAdvertiser::Work, put up test dialog");
-            //DialogResult res = MessageBox.Show("This is a trivial test dialog", "Confirmation",
-            //                                   MessageBoxButtons.OKCancel, MessageBoxIcon.Information);
-            //if (res == DialogResult.OK)
-            //{
-            //    Debug.WriteLine("WM, WiFiAdvertiser::Work, clicked OK");
-            //    MessageBox.Show("You clicked the OK button");
-            //    // do whatever
-            //}
-            //if (res == DialogResult.Cancel)
-            //{
-            //    Debug.WriteLine("WM, WiFiAdvertiser::Work, clicked Cancel");
-            //    MessageBox.Show("You clicked the Cancel button");
-            //    // do whatever
-            //}
-            //Debug.WriteLine("WM, WiFiAdvertiser::Work, test dialog done");
-            // WM, end of Experiment 1
-
-            // WM, Experiment 2 -- generate QR code with our IP address and display it
-            // This code based on AndroidSyncDialog in HearThis.
-            //   - HearThis uses 'ZXing' so we do too, which requires a 'using' stmt above
-            //     and adding package 'ZXing.Net' to BloomExe.csproj
+            // Generate QR code with our IP address and display it
+            // This code based on AndroidSyncDialog.cs in HearThis.
+            // HearThis uses 'ZXing' so we do too, which requires a 'using'
+            // statement above and adding package 'ZXing.Net' to BloomExe.csproj.
             string _ourIpAddress = GetIpAddressOfNetworkIface();
-            Debug.WriteLine("WM, WiFiAdvertiser::Work, _ourIpAddress = " + _ourIpAddress);
             var qrBox = new PictureBox();
             var writer = new BarcodeWriter
             {
@@ -118,33 +95,16 @@ namespace Bloom.Publish.BloomPub.wifi
                 }
             };
             var matrix = writer.Write(_ourIpAddress);
-            Debug.WriteLine("WM, WiFiAdvertiser::Work, created BarcodeWriter and wrote QR with it");
             var qrBitmap = new Bitmap(matrix);
             qrBox.Image = qrBitmap;
             qrBox.Dock = DockStyle.Fill;
-            Debug.WriteLine("WM, WiFiAdvertiser::Work, converted QR to Bitmap in qrBox.Image");
+            Debug.WriteLine("WM, WiFiAdvertiser::Work, QR code ready, now display it"); // WM, temporary
 
             // QR code created; now display it.
-            //var qrForm = new Form();
-            //qrForm.Controls.Add(qrBox);
-            //qrForm.Show();
-            // Try suggestion from Andrew: use a BloomMessageBox to display QR code.
-            // Save the rendered QR code as a temporary file, then pass a pointer to
-            // the file to a BloomMessageBox via HTML.
-            //qrBitmap.Save("C:\\temp\\qr-saved.bmp", ImageFormat.Bmp);
-            //Debug.WriteLine("WM, WiFiAdvertiser::Work, saved QR bitmap in C:\\temp, calling BloomMessageBox");
-            //var bloomBox = new BloomMessageBox();
-            //bloomBox.Show(qrBitmapFileLink);
-            //BloomMessageBox.ShowWarning("<p>QR code for Reader to scan</p><img src=\"file:///C:\\temp\\qr-saved.bmp\" />");
-            //BloomMessageBox.ShowInfo(
-            //    "<p>QR code for Reader to scan</p><img src=\"file:///C:\\temp\\qr-saved.bmp\" />"
-            //);
             Form form = new Form();
             form.Text = "QR code";
             form.Controls.Add(qrBox);
             Application.Run(form);
-            Debug.WriteLine("WM, WiFiAdvertiser::Work, displaying QR code");
-            // WM, end of Experiment 2
 
             Debug.WriteLine("WM, WiFiAdvertiser::Work, begin UDP advertising loop"); // WM, temporary
             try
