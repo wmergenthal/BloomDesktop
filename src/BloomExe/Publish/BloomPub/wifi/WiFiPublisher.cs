@@ -102,7 +102,7 @@ namespace Bloom.Publish.BloomPub.wifi
 
                     // Only allow one listener at a time to send a book.
                     Debug.WriteLine("WM, WiFiPublisher::Start, UDP, asking for mutex");
-                    wifiPublishMutex.WaitOne(mutexWaitTimeMsec);
+                    wifiPublishMutex.WaitOne(mutexWaitTimeMsec);  // WHAT TO DO IF WAIT LASTS LONGER THAN THE WAIT TIME ???? ABORT?
                     Debug.WriteLine("WM, WiFiPublisher::Start, UDP, got mutex, calling StartSendBookOverWiFi()"); // WM, temporary
                     StartSendBookOverWiFi(
                         book,
@@ -162,7 +162,7 @@ namespace Bloom.Publish.BloomPub.wifi
 
                     // Only allow one listener at a time to send a book.
                     Debug.WriteLine("WM, WiFiPublisher::Start, TCP, asking for mutex");
-                    wifiPublishMutex.WaitOne(mutexWaitTimeMsec);
+                    wifiPublishMutex.WaitOne(mutexWaitTimeMsec);  // WHAT TO DO IF WAIT LASTS LONGER THAN THE WAIT TIME ???? ABORT?
                     Debug.WriteLine("WM, WiFiPublisher::Start, TCP, got mutex, calling StartSendBookOverWiFi()"); // WM, temporary
                     StartSendBookOverWiFi(
                         book,
