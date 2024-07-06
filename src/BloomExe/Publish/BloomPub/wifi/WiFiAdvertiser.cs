@@ -24,6 +24,7 @@ namespace Bloom.Publish.BloomPub.wifi
         // The information we will advertise.
         public string BookTitle;
         private string _bookVersion;
+        dynamic advertisement = new DynamicJson();
 
         public string BookVersion
         {
@@ -83,8 +84,9 @@ namespace Bloom.Publish.BloomPub.wifi
             // This code based on AndroidSyncDialog.cs in HearThis.
             // HearThis uses 'ZXing' so we do too, which requires a 'using'
             // statement above and adding package 'ZXing.Net' to BloomExe.csproj.
-            string _ourIpAddress = GetIpAddressOfNetworkIface();
             var qrBox = new PictureBox();
+            qrBox.Height = 200;  // tweak as desired
+            qrBox.Width = 200;   // tweak as desired
             var writer = new BarcodeWriter
             {
                 Format = BarcodeFormat.QR_CODE,
@@ -94,7 +96,13 @@ namespace Bloom.Publish.BloomPub.wifi
                     Width = qrBox.Width
                 }
             };
-            var matrix = writer.Write(_ourIpAddress);
+            //string _ourIpAddress = GetIpAddressOfNetworkIface();
+            //var matrix = writer.Write(_ourIpAddress);
+            UpdateAdvertisementBasedOnCurrentIpAddress();  // sets data in 'advertisement'
+            // TODO: ensure that UDP advert has same content as QR code
+            //       put QR code display in a separate thread if possible, because regular
+            //       UDP adverts don't occur while the QR code is being displayed
+            var matrix = writer.Write(advertisement.ToString());
             var qrBitmap = new Bitmap(matrix);
             qrBox.Image = qrBitmap;
             qrBox.Dock = DockStyle.Fill;
@@ -102,7 +110,7 @@ namespace Bloom.Publish.BloomPub.wifi
 
             // QR code created; now display it.
             Form form = new Form();
-            form.Text = "QR code";
+            form.Text = "Scan this QR code with BloomReader";
             form.Controls.Add(qrBox);
             Application.Run(form);
 
@@ -162,7 +170,7 @@ namespace Bloom.Publish.BloomPub.wifi
             if (_cachedIpAddress != _currentIpAddress)
             {
                 _cachedIpAddress = _currentIpAddress;   // save snapshot of our new IP address
-                dynamic advertisement = new DynamicJson();
+                //dynamic advertisement = new DynamicJson();  -- put up to class scope
                 advertisement.title = BookTitle;
                 advertisement.version = BookVersion;
                 advertisement.language = TitleLanguage;
