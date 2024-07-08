@@ -9,7 +9,6 @@ using System.Threading;
 using System.Windows.Forms;
 using Bloom.Api;
 using Bloom.web;
-using Bloom.MiscUI;  // for BloomMessageBox
 //using SIL.Progress;
 using ZXing;
 using System.Drawing.Imaging;
@@ -21,7 +20,7 @@ namespace Bloom.Publish.BloomPub.wifi
     /// </summary>
     public class WiFiAdvertiser : IDisposable
     {
-        // The information we will advertise.
+        // The information we will advertise, via both UDP broadcast and QR code.
         public string BookTitle;
         private string _bookVersion;
         dynamic advertisement = new DynamicJson();
@@ -69,18 +68,12 @@ namespace Bloom.Publish.BloomPub.wifi
             _thread = new Thread(Work);
             Debug.WriteLine("WM, WiFiAdvertiser::Start, work thread start"); // WM, temporary
             _thread.Start();
-        }
 
-        public bool Paused { get; set; }
-
-        private void Work()
-        {
-            _progress.Message(
-                idSuffix: "beginAdvertising",
-                message: "Advertising book to Bloom Readers on local network..."
-            );
-
-            // Generate QR code with our IP address and display it
+            // Generate QR code (same content as UDP advert) and display it.
+            // Do it here, before entering the once-per-second loop, because
+            // we want it visible *during* the advertising loop. Normally that
+            // require its own thread, but that seems an unnecessary complication
+            // since the QR won't be changing.
             // This code based on AndroidSyncDialog.cs in HearThis.
             // HearThis uses 'ZXing' so we do too, which requires a 'using'
             // statement above and adding package 'ZXing.Net' to BloomExe.csproj.
@@ -96,23 +89,32 @@ namespace Bloom.Publish.BloomPub.wifi
                     Width = qrBox.Width
                 }
             };
-            //string _ourIpAddress = GetIpAddressOfNetworkIface();
-            //var matrix = writer.Write(_ourIpAddress);
-            UpdateAdvertisementBasedOnCurrentIpAddress();  // sets data in 'advertisement'
-            // TODO: ensure that UDP advert has same content as QR code
-            //       put QR code display in a separate thread if possible, because regular
-            //       UDP adverts don't occur while the QR code is being displayed
+
+            // Set the data content in 'advertisement'.
+            UpdateAdvertisementBasedOnCurrentIpAddress();
+
+            // Encode 'advertisement' content into a QR code.
             var matrix = writer.Write(advertisement.ToString());
             var qrBitmap = new Bitmap(matrix);
             qrBox.Image = qrBitmap;
             qrBox.Dock = DockStyle.Fill;
-            Debug.WriteLine("WM, WiFiAdvertiser::Work, QR code ready, now display it"); // WM, temporary
-
+            Debug.WriteLine("WM, WiFiAdvertiser::Start, QR code ready, now display it"); // WM, temporary
+            
             // QR code created; now display it.
             Form form = new Form();
             form.Text = "Scan this QR code with BloomReader";
             form.Controls.Add(qrBox);
-            Application.Run(form);
+            form.ShowDialog();
+        }
+
+        public bool Paused { get; set; }
+
+        private void Work()
+        {
+            _progress.Message(
+                idSuffix: "beginAdvertising",
+                message: "Advertising book to Bloom Readers on local network..."
+            );
 
             Debug.WriteLine("WM, WiFiAdvertiser::Work, begin UDP advertising loop"); // WM, temporary
             try

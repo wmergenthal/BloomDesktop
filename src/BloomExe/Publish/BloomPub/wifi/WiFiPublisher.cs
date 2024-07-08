@@ -98,22 +98,27 @@ namespace Bloom.Publish.BloomPub.wifi
                     // Of course, there are async effects from network latency. But if we do get another request while
                     // handling this one, we will ignore it, since StartSendBook checks for a transfer in progress.
                     _wifiAdvertiser.Paused = true;
-                    Debug.WriteLine("WM, WiFiPublisher::Start, UDP, advertising is Paused");
+                    Debug.WriteLine("WM, WiFiPublisher::Start, UDP, advertising is Paused"); // WM, temporary
 
                     // Only allow one listener at a time to send a book.
-                    Debug.WriteLine("WM, WiFiPublisher::Start, UDP, asking for mutex");
-                    wifiPublishMutex.WaitOne(mutexWaitTimeMsec);  // WHAT TO DO IF WAIT LASTS LONGER THAN THE WAIT TIME ???? ABORT?
-                    Debug.WriteLine("WM, WiFiPublisher::Start, UDP, got mutex, calling StartSendBookOverWiFi()"); // WM, temporary
-                    StartSendBookOverWiFi(
-                        book,
-                        androidIpAddress,
-                        androidName,
-                        backColor,
-                        publishSettings
-                    );
-                    wifiPublishMutex.ReleaseMutex();
-                    Debug.WriteLine("WM, WiFiPublisher::Start, UDP, released mutex");
-
+                    Debug.WriteLine("WM, WiFiPublisher::Start, UDP, asking for mutex"); // WM, temporary
+                    if (wifiPublishMutex.WaitOne(mutexWaitTimeMsec) == true)
+                    {
+                        Debug.WriteLine("WM, WiFiPublisher::Start, UDP, got mutex, calling StartSendBookOverWiFi()"); // WM, temporary
+                        StartSendBookOverWiFi(
+                            book,
+                            androidIpAddress,
+                            androidName,
+                            backColor,
+                            publishSettings
+                        );
+                        wifiPublishMutex.ReleaseMutex();
+                        Debug.WriteLine("WM, WiFiPublisher::Start, UDP, released mutex"); // WM, temporary
+                    }
+                    else
+                    {
+                        Debug.WriteLine("WM, WiFiPublisher::Start, UDP, did NOT get mutex after " + mutexWaitTimeMsec + " msec");
+                    }
                     // Returns immediately. But we don't resume advertisements until the async send completes.
                 }
                 // If there's something wrong with the JSON (maybe an obsolete or newer version of reader?)
@@ -158,22 +163,27 @@ namespace Bloom.Publish.BloomPub.wifi
                     // Of course, there are async effects from network latency. But if we do get another request while
                     // handling this one, we will ignore it, since StartSendBook checks for a transfer in progress.
                     _wifiAdvertiser.Paused = true;
-                    Debug.WriteLine("WM, WiFiPublisher::Start, TCP, advertising is Paused");
+                    Debug.WriteLine("WM, WiFiPublisher::Start, TCP, advertising is Paused"); // WM, temporary
 
                     // Only allow one listener at a time to send a book.
-                    Debug.WriteLine("WM, WiFiPublisher::Start, TCP, asking for mutex");
-                    wifiPublishMutex.WaitOne(mutexWaitTimeMsec);  // WHAT TO DO IF WAIT LASTS LONGER THAN THE WAIT TIME ???? ABORT?
-                    Debug.WriteLine("WM, WiFiPublisher::Start, TCP, got mutex, calling StartSendBookOverWiFi()"); // WM, temporary
-                    StartSendBookOverWiFi(
-                        book,
-                        androidIpAddress,
-                        androidName,
-                        backColor,
-                        publishSettings
-                    );
-                    wifiPublishMutex.ReleaseMutex();
-                    Debug.WriteLine("WM, WiFiPublisher::Start, TCP, released mutex");
-
+                    Debug.WriteLine("WM, WiFiPublisher::Start, TCP, asking for mutex"); // WM, temporary
+                    if (wifiPublishMutex.WaitOne(mutexWaitTimeMsec))
+                    {
+                        Debug.WriteLine("WM, WiFiPublisher::Start, TCP, got mutex, calling StartSendBookOverWiFi()"); // WM, temporary
+                        StartSendBookOverWiFi(
+                            book,
+                            androidIpAddress,
+                            androidName,
+                            backColor,
+                            publishSettings
+                        );
+                        wifiPublishMutex.ReleaseMutex();
+                        Debug.WriteLine("WM, WiFiPublisher::Start, TCP, released mutex"); // WM, temporary
+                    }
+                    else
+                    {
+                        Debug.WriteLine("WM, WiFiPublisher::Start, TCP, did NOT get mutex after " + mutexWaitTimeMsec + " msec");
+                    }
                     // Returns immediately. But we don't resume advertisements until the async send completes.
                 }
                 // If there's something wrong with the JSON (maybe an obsolete or newer version of reader?)
