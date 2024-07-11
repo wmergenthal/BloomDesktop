@@ -11,6 +11,7 @@ using Bloom.Collection;
 using Bloom.web;
 using L10NSharp;
 using Newtonsoft.Json;
+using Sentry;
 using SIL.IO;
 using static System.Windows.Forms.VisualStyles.VisualStyleElement.TaskbarClock;
 
@@ -23,7 +24,10 @@ namespace Bloom.Publish.BloomPub.wifi
     {
         private readonly BookServer _bookServer;
         private readonly WebSocketProgress _progress;
-        private WiFiAdvertiser _wifiAdvertiser;
+        //private WiFiAdvertiser _wifiAdvertiser;
+        //private WiFiAdvertiserQR _wifiAdvertiserQR;
+        public WiFiAdvertiser _wifiAdvertiser;      // public to enable advert string to be shared
+        public WiFiAdvertiserQR _wifiAdvertiserQR;  // public to enable advert string to be shared
         private BloomReaderUDPListener _wifiListenerUDP;
         private BloomReaderTCPListener _wifiListenerTCP;
         public const string ProtocolVersion = "2.0";
@@ -31,6 +35,8 @@ namespace Bloom.Publish.BloomPub.wifi
         //public const string ProtocolVersion = "3.0";  // WM, experiment
         private static Mutex wifiPublishMutex;
         private int mutexWaitTimeMsec = 60000;   // 1 minute; long enough?
+
+        //private string advertFromAdvertiser;
 
         // This is the web client we use in StartSendBookToClientOnLocalSubNet() to send a book to an android.
         // It is non-null only for the duration of a send, being destroyed in its own UploadDataCompleted
@@ -208,6 +214,8 @@ namespace Bloom.Publish.BloomPub.wifi
 
             var pathHtmlFile = book.GetPathHtmlFile();
             Debug.WriteLine("WM, WiFiPublisher::Start, book's pathHtmlFile = " + pathHtmlFile); // WM, temporary
+
+            // Create and start the UPD Advertiser. It runs in its own thread.
             Debug.WriteLine("WM, WiFiPublisher::Start, instantiating _wifiAdvertiser"); // WM, temporary
             _wifiAdvertiser = new WiFiAdvertiser(_progress)
             {
@@ -222,6 +230,15 @@ namespace Bloom.Publish.BloomPub.wifi
             PublishToBloomPubApi.CheckBookLayout(book, _progress);
             Debug.WriteLine("WM, WiFiPublisher::Start, starting _wifiAdvertiser"); // WM, temporary
             _wifiAdvertiser.Start();
+
+            // Create and start the QR-code Advertiser. It runs in its own thread.
+            Debug.WriteLine("WM, WiFiPublisher::Start, instantiating _wifiAdvertiserQR"); // WM, temporary
+            _wifiAdvertiserQR = new WiFiAdvertiserQR()
+            {
+                // don't know what if anything needs to go here
+            };
+            Debug.WriteLine("WM, WiFiPublisher::Start, starting _wifiAdvertiserQR"); // WM, temporary
+            _wifiAdvertiserQR.Start();
 
             var part1 = LocalizationManager.GetDynamicString(
                 appId: "Bloom",
@@ -238,6 +255,22 @@ namespace Bloom.Publish.BloomPub.wifi
             _progress.MessageWithoutLocalizing(part1 + " " + part2, ProgressKind.Instruction);
         }
 
+        // Be the middle-man to enable the QR thread to obtain the
+        // advertisement currently being used by the UDP broadcast thread.
+        public void SetCurrentAdvert()
+        {
+            string advert = _wifiAdvertiser.GetAdvertString();
+            _wifiAdvertiserQR.SetAdvertString(advert);
+            //return temp;
+            //return (_wifiAdvertiser.GetAdvertString());
+            //return (WiFiAdvertiser.GetAdvertString());
+        }
+
+        //public string GetCurrentAdvert()
+        //{
+        //    return advertFromAdvertiser;
+        //}
+
         public void Stop()
         {
             // Locked to avoid contention with code in the thread that reports a transfer complete,
@@ -251,6 +284,13 @@ namespace Bloom.Publish.BloomPub.wifi
                     _wifiAdvertiser.Stop();
                     _wifiAdvertiser.Dispose();
                     _wifiAdvertiser = null;
+                }
+                if (_wifiAdvertiserQR != null)
+                {
+                    Debug.WriteLine("WM, WiFiPublisher::Stop, deleting _wifiAdvertiserQR"); // WM, temporary
+                    _wifiAdvertiserQR.Stop();
+                    _wifiAdvertiserQR.Dispose();
+                    _wifiAdvertiserQR = null;
                 }
                 if (_wifiSender != null)
                 {

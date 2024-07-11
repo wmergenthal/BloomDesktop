@@ -9,6 +9,7 @@ using System.Threading;
 using System.Windows.Forms;
 using Bloom.Api;
 using Bloom.web;
+using Bloom.MiscUI;  // for BloomMessageBox
 //using SIL.Progress;
 using ZXing;
 using System.Drawing.Imaging;
@@ -20,7 +21,8 @@ namespace Bloom.Publish.BloomPub.wifi
     /// </summary>
     public class WiFiAdvertiser : IDisposable
     {
-        // The information we will advertise, via both UDP broadcast and QR code.
+        // The information that BloomDesktop will advertise, via both
+        // UDP broadcast (this class) and QR code (a different class).
         public string BookTitle;
         private string _bookVersion;
         dynamic advertisement = new DynamicJson();
@@ -37,6 +39,11 @@ namespace Bloom.Publish.BloomPub.wifi
             }
         }
         public string TitleLanguage;
+
+        public string GetAdvertString()
+        {
+            return advertisement.ToString();
+        }
 
         private UdpClient _client;
         private Thread _thread;
@@ -68,43 +75,6 @@ namespace Bloom.Publish.BloomPub.wifi
             _thread = new Thread(Work);
             Debug.WriteLine("WM, WiFiAdvertiser::Start, work thread start"); // WM, temporary
             _thread.Start();
-
-            // Generate QR code (same content as UDP advert) and display it.
-            // Do it here, before entering the once-per-second loop, because
-            // we want it visible *during* the advertising loop. Normally that
-            // require its own thread, but that seems an unnecessary complication
-            // since the QR won't be changing.
-            // This code based on AndroidSyncDialog.cs in HearThis.
-            // HearThis uses 'ZXing' so we do too, which requires a 'using'
-            // statement above and adding package 'ZXing.Net' to BloomExe.csproj.
-            var qrBox = new PictureBox();
-            qrBox.Height = 200;  // tweak as desired
-            qrBox.Width = 200;   // tweak as desired
-            var writer = new BarcodeWriter
-            {
-                Format = BarcodeFormat.QR_CODE,
-                Options =
-                {
-                    Height = qrBox.Height,
-                    Width = qrBox.Width
-                }
-            };
-
-            // Set the data content in 'advertisement'.
-            UpdateAdvertisementBasedOnCurrentIpAddress();
-
-            // Encode 'advertisement' content into a QR code.
-            var matrix = writer.Write(advertisement.ToString());
-            var qrBitmap = new Bitmap(matrix);
-            qrBox.Image = qrBitmap;
-            qrBox.Dock = DockStyle.Fill;
-            Debug.WriteLine("WM, WiFiAdvertiser::Start, QR code ready, now display it"); // WM, temporary
-            
-            // QR code created; now display it.
-            Form form = new Form();
-            form.Text = "Scan this QR code with BloomReader";
-            form.Controls.Add(qrBox);
-            form.ShowDialog();
         }
 
         public bool Paused { get; set; }
@@ -115,6 +85,40 @@ namespace Bloom.Publish.BloomPub.wifi
                 idSuffix: "beginAdvertising",
                 message: "Advertising book to Bloom Readers on local network..."
             );
+
+            // Generate QR code with our IP address and display it
+            // This code based on AndroidSyncDialog.cs in HearThis.
+            // HearThis uses 'ZXing' so we do too, which requires a 'using'
+            // statement above and adding package 'ZXing.Net' to BloomExe.csproj.
+            //var qrBox = new PictureBox();
+            //qrBox.Height = 225;  // tweak as desired
+            //qrBox.Width = 225;   // tweak as desired
+            //var writer = new BarcodeWriter
+            //{
+            //    Format = BarcodeFormat.QR_CODE,
+            //    Options =
+            //    {
+            //        Height = qrBox.Height,
+            //        Width = qrBox.Width
+            //    }
+            //};
+            ////string _ourIpAddress = GetIpAddressOfNetworkIface();
+            ////var matrix = writer.Write(_ourIpAddress);
+            //UpdateAdvertisementBasedOnCurrentIpAddress();  // sets data in 'advertisement'
+            //// TODO: ensure that UDP advert has same content as QR code
+            ////       put QR code display in a separate thread if possible, because regular
+            ////       UDP adverts don't occur while the QR code is being displayed
+            //var matrix = writer.Write(advertisement.ToString());
+            //var qrBitmap = new Bitmap(matrix);
+            //qrBox.Image = qrBitmap;
+            //qrBox.Dock = DockStyle.Fill;
+            //Debug.WriteLine("WM, WiFiAdvertiser::Work, QR code ready, now display it"); // WM, temporary
+            //
+            //// QR code created; now display it.
+            //Form form = new Form();
+            //form.Text = "Scan this QR code with BloomReader";
+            //form.Controls.Add(qrBox);
+            //Application.Run(form);
 
             Debug.WriteLine("WM, WiFiAdvertiser::Work, begin UDP advertising loop"); // WM, temporary
             try
@@ -169,6 +173,16 @@ namespace Bloom.Publish.BloomPub.wifi
         {
             Debug.WriteLine("WM, WiFiAdvertiser::UABOCIA, begin, _cachedIpAddress = " + _cachedIpAddress); // WM, temporary
             _currentIpAddress = GetIpAddressOfNetworkIface();
+            if (_cachedIpAddress == "") {
+                // The ZXing lib doesn't like empty fields but at startup the cached
+                // IP address is still empty. So to keep ZXing happy, fill it -- but
+                // not with the actual current address, else we'll skip the if-block
+                // and sendBytes[] won't get filled.
+                _cachedIpAddress = "1.2.3.4";
+                Debug.WriteLine("WM, WiFiAdvertiser::UABOCIA, _cachedIpAddress now = " + _cachedIpAddress); // WM, temporary
+            } else {
+                Debug.WriteLine("WM, WiFiAdvertiser::UABOCIA, didn't need to touch _cachedIpAddress"); // WM, temporary
+            }
             if (_cachedIpAddress != _currentIpAddress)
             {
                 _cachedIpAddress = _currentIpAddress;   // save snapshot of our new IP address
@@ -178,6 +192,7 @@ namespace Bloom.Publish.BloomPub.wifi
                 advertisement.language = TitleLanguage;
                 advertisement.protocolVersion = WiFiPublisher.ProtocolVersion;
                 advertisement.sender = System.Environment.MachineName;
+                advertisement.senderIP = _currentIpAddress;
 
                 _sendBytes = Encoding.UTF8.GetBytes(advertisement.ToString());
                 //EventLog.WriteEntry("Application", "Serving at http://" + _currentIpAddress + ":" + ChorusHubOptions.MercurialPort, EventLogEntryType.Information);
@@ -192,29 +207,29 @@ namespace Bloom.Publish.BloomPub.wifi
         ///
         /// </summary>
         /// <returns></returns>
-        private string GetLocalIpAddress()
-        {
-            string localIp = null;
-            var host = Dns.GetHostEntry(Dns.GetHostName());
-
-            foreach (
-                var ipAddress in host.AddressList.Where(
-                    ipAddress => ipAddress.AddressFamily == AddressFamily.InterNetwork
-                )
-            )
-            {
-                if (localIp != null)
-                {
-                    if (host.AddressList.Length > 1)
-                    {
-                        //EventLog.WriteEntry("Application", "Warning: this machine has more than one IP address", EventLogEntryType.Warning);
-                    }
-                }
-                localIp = ipAddress.ToString();
-            }
-            Debug.WriteLine("WM, WiFiAdvertiser::GetLocalIpAddress, returning localIp = " + localIp); // WM, temporary
-            return localIp ?? "Could not determine IP Address!";
-        }
+        //private string GetLocalIpAddress()
+        //{
+        //    string localIp = null;
+        //    var host = Dns.GetHostEntry(Dns.GetHostName());
+        //
+        //    foreach (
+        //        var ipAddress in host.AddressList.Where(
+        //            ipAddress => ipAddress.AddressFamily == AddressFamily.InterNetwork
+        //        )
+        //    )
+        //    {
+        //        if (localIp != null)
+        //        {
+        //            if (host.AddressList.Length > 1)
+        //            {
+        //                //EventLog.WriteEntry("Application", "Warning: this machine has more than one IP address", EventLogEntryType.Warning);
+        //            }
+        //        }
+        //        localIp = ipAddress.ToString();
+        //    }
+        //    Debug.WriteLine("WM, WiFiAdvertiser::GetLocalIpAddress, returning localIp = " + localIp); // WM, temporary
+        //    return localIp ?? "Could not determine IP Address!";
+        //}
 
         // We need the IP address of *this* (the local) machine. Since a machine running BloomDesktop can have
         // multiple IP addresses (mine has 9, a mix of both IPv4 and IPv6), we must be judicious in selecting the
