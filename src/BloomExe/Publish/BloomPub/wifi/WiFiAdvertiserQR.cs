@@ -23,9 +23,13 @@ namespace Bloom.Publish.BloomPub.wifi
 
         private Thread _thread;
 
-        internal WiFiAdvertiserQR()
+        // Need to call back into WiFiPublisher to make it update our copy of the
+        // advert. This object reference enables that.
+        private readonly WiFiPublisher _wiFiPublisher;
+
+        internal WiFiAdvertiserQR(WiFiPublisher publisherObject)
         {
-            //_progress = progress;
+            _wiFiPublisher = publisherObject;
         }
 
         public void Start()
@@ -50,6 +54,10 @@ namespace Bloom.Publish.BloomPub.wifi
             // This code based on AndroidSyncDialog.cs in HearThis.
             // HearThis uses 'ZXing' so we do too, which requires a 'using'
             // statement above and adding package 'ZXing.Net' to BloomExe.csproj.
+
+            // Update our local copy of the advert.
+            _wiFiPublisher.SetCurrentAdvert();
+
             var qrBox = new PictureBox();
             qrBox.Height = 225;  // tweak as desired
             qrBox.Width = 225;   // tweak as desired

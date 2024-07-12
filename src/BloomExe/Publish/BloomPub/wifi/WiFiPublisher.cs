@@ -233,7 +233,7 @@ namespace Bloom.Publish.BloomPub.wifi
 
             // Create and start the QR-code Advertiser. It runs in its own thread.
             Debug.WriteLine("WM, WiFiPublisher::Start, instantiating _wifiAdvertiserQR"); // WM, temporary
-            _wifiAdvertiserQR = new WiFiAdvertiserQR()
+            _wifiAdvertiserQR = new WiFiAdvertiserQR(this)
             {
                 // don't know what if anything needs to go here
             };
@@ -259,6 +259,7 @@ namespace Bloom.Publish.BloomPub.wifi
         // advertisement currently being used by the UDP broadcast thread.
         public void SetCurrentAdvert()
         {
+            Debug.WriteLine("WM, WiFiPublisher::SetCurrentAdvert, calling"); // WM, temporary
             string advert = _wifiAdvertiser.GetAdvertString();
             _wifiAdvertiserQR.SetAdvertString(advert);
             //return temp;
