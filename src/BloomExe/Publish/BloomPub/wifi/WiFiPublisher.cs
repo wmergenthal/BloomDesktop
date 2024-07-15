@@ -24,19 +24,13 @@ namespace Bloom.Publish.BloomPub.wifi
     {
         private readonly BookServer _bookServer;
         private readonly WebSocketProgress _progress;
-        //private WiFiAdvertiser _wifiAdvertiser;
-        //private WiFiAdvertiserQR _wifiAdvertiserQR;
-        public WiFiAdvertiser _wifiAdvertiser;      // public to enable advert string to be shared
-        public WiFiAdvertiserQR _wifiAdvertiserQR;  // public to enable advert string to be shared
+        private WiFiAdvertiser _wifiAdvertiser;
+        private WiFiAdvertiserQR _wifiAdvertiserQR;
         private BloomReaderUDPListener _wifiListenerUDP;
         private BloomReaderTCPListener _wifiListenerTCP;
         public const string ProtocolVersion = "2.0";
-        //public const string ProtocolVersion = "1.9";  // WM, experiment
-        //public const string ProtocolVersion = "3.0";  // WM, experiment
         private static Mutex wifiPublishMutex;
         private int mutexWaitTimeMsec = 60000;   // 1 minute; long enough?
-
-        //private string advertFromAdvertiser;
 
         // This is the web client we use in StartSendBookToClientOnLocalSubNet() to send a book to an android.
         // It is non-null only for the duration of a send, being destroyed in its own UploadDataCompleted
@@ -232,10 +226,11 @@ namespace Bloom.Publish.BloomPub.wifi
             _wifiAdvertiser.Start();
 
             // Create and start the QR-code Advertiser. It runs in its own thread.
+            // Pass in a copy of UDP-advertiser's object reference so that QR-advertiser
+            // can generate QR codes containing the same data that UDP-advertiser broadcasts.
             Debug.WriteLine("WM, WiFiPublisher::Start, instantiating _wifiAdvertiserQR"); // WM, temporary
-            _wifiAdvertiserQR = new WiFiAdvertiserQR(this)
+            _wifiAdvertiserQR = new WiFiAdvertiserQR(_wifiAdvertiser)
             {
-                // don't know what if anything needs to go here
             };
             Debug.WriteLine("WM, WiFiPublisher::Start, starting _wifiAdvertiserQR"); // WM, temporary
             _wifiAdvertiserQR.Start();
@@ -254,23 +249,6 @@ namespace Bloom.Publish.BloomPub.wifi
             // can only have one instruction up at a time, so we concatenate these
             _progress.MessageWithoutLocalizing(part1 + " " + part2, ProgressKind.Instruction);
         }
-
-        // Be the middle-man to enable the QR thread to obtain the
-        // advertisement currently being used by the UDP broadcast thread.
-        public void SetCurrentAdvert()
-        {
-            Debug.WriteLine("WM, WiFiPublisher::SetCurrentAdvert, calling"); // WM, temporary
-            string advert = _wifiAdvertiser.GetAdvertString();
-            _wifiAdvertiserQR.SetAdvertString(advert);
-            //return temp;
-            //return (_wifiAdvertiser.GetAdvertString());
-            //return (WiFiAdvertiser.GetAdvertString());
-        }
-
-        //public string GetCurrentAdvert()
-        //{
-        //    return advertFromAdvertiser;
-        //}
 
         public void Stop()
         {
@@ -381,23 +359,6 @@ namespace Bloom.Publish.BloomPub.wifi
                     Debug.WriteLine("WM, WiFiPublisher::SSBTCOLS, xfer in progress, returning"); // WM, temporary
                     return;
                 }
-                // WM, test-only alternative for when adverts stop after just one, no 1-per-sec loop:
-                //if (_wifiSender != null) {  // indicates transfer in progress
-                //    int waitCount = 12;
-                //    while (waitCount > 0) {
-                //        Debug.WriteLine("WM, WiFiPublisher::SSBTCOLS, xfer in progress, wait 5-sec...");
-                //        Thread.Sleep(5000);
-                //        if (_wifiSender == null) {
-                //            Debug.WriteLine("WM, WiFiPublisher::SSBTCOLS, xfer complete, proceed");
-                //            break;
-                //        }
-                //        waitCount--;
-                //        Debug.WriteLine("WM, WiFiPublisher::SSBTCOLS, xfer still ongoing, countdown = " + waitCount);
-                //    }
-                //    Debug.WriteLine("WM, WiFiPublisher::SSBTCOLS, waited but xfer still ongoing, bail");
-                //    return;
-                //}
-
                 // now THIS transfer is 'in progress' as far as any thread checking this is concerned.
                 Debug.WriteLine("WM, WiFiPublisher::SSBTCOLS, creating WebClient for sending"); // WM, temporary
                 _wifiSender = new WebClient();

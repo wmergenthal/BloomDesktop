@@ -5,8 +5,6 @@ using System.Threading;
 using System.Windows.Forms;
 using Bloom.Api;
 using ZXing;
-//using System.Drawing.Imaging;
-//using WiFiAdvertiser;
 
 namespace Bloom.Publish.BloomPub.wifi
 {
@@ -15,21 +13,20 @@ namespace Bloom.Publish.BloomPub.wifi
     /// </summary>
     public class WiFiAdvertiserQR : IDisposable
     {
-        // The information that BloomDesktop will advertise, via both
-        // UDP broadcast (a different class) and QR code (this class).
-        // Initialize it with nonsense to prevent the ZXing lib from
-        // falling over trying to create a QR code from an empty string.
-        public string AdvertToShowAsQrCode = "initial-string-so-ZXing-doesnt-see-null";
-
         private Thread _thread;
 
-        // Need to call back into WiFiPublisher to make it update our copy of the
-        // advert. This object reference enables that.
-        private readonly WiFiPublisher _wiFiPublisher;
+        // The information that BloomDesktop will advertise, via both
+        // UDP broadcast (a different class) and QR code (this class).
+        private string AdvertToShowAsQrCode;
 
-        internal WiFiAdvertiserQR(WiFiPublisher publisherObject)
+        // Need to call into the other advertiser to get a copy of the data
+        // it is advertising. This object reference enables that, and is set
+        // at instantiation time.
+        private readonly WiFiAdvertiser _wiFiAdvertiserUdp;
+
+        internal WiFiAdvertiserQR(WiFiAdvertiser advertiserUdpObject)
         {
-            _wiFiPublisher = publisherObject;
+            _wiFiAdvertiserUdp = advertiserUdpObject;
         }
 
         public void Start()
@@ -39,24 +36,27 @@ namespace Bloom.Publish.BloomPub.wifi
             _thread.Start();
         }
 
-        //public bool Paused { get; set; }
-
-        public void SetAdvertString(string input)
-        {
-            Debug.WriteLine("WM, WiFiAdvertiserQR::SetAdvertString, called with " + input); // WM, temporary
-            AdvertToShowAsQrCode = input;
-        }
-
+        // Generate QR code with the *same data* sent out in the UDP broadcast.
+        // 
+        // This code based on AndroidSyncDialog.cs in HearThis.
+        // HearThis uses 'ZXing' so we do too, which requires a 'using'
+        // statement above and adding package 'ZXing.Net' to BloomExe.csproj.
         private void generateAndDisplayQR()
         {
-            // Generate QR code with the same data sent out in the UDP broadcast.
+            // Update our local copy of the UDP advert from UDP advertiser.
+            // Note: it is possible that UDP advertiser has not yet generated the
+            // UDP advert. If so then abort -- we don't want to confuse the user by
+            // showing a QR code that contains no data. We're in a loop here so we
+            // will get the advert data when UDP advertiser eventually produces it.
             // 
-            // This code based on AndroidSyncDialog.cs in HearThis.
-            // HearThis uses 'ZXing' so we do too, which requires a 'using'
-            // statement above and adding package 'ZXing.Net' to BloomExe.csproj.
-
-            // Update our local copy of the advert.
-            _wiFiPublisher.SetCurrentAdvert();
+            // QUESTION: instead of determining that an advert is empty by looking for
+            // "{}", should we look for a string length that is too small to be valid?
+            AdvertToShowAsQrCode = _wiFiAdvertiserUdp.GetAdvertString();
+            if (AdvertToShowAsQrCode == "{}")
+            {
+                Debug.WriteLine("WM, WiFiAdvertiserQR::generateAndDisplayQR, no advert yet, bail");
+                return;
+            }
 
             var qrBox = new PictureBox();
             qrBox.Height = 225;  // tweak as desired
@@ -76,7 +76,6 @@ namespace Bloom.Publish.BloomPub.wifi
             var qrBitmap = new Bitmap(matrix);
             qrBox.Image = qrBitmap;
             qrBox.Dock = DockStyle.Fill;
-            Debug.WriteLine("WM, WiFiAdvertiserQR::generateAndDisplayQR, QR code ready, now display it"); // WM, temporary
 
             // QR code is created; now display it.
             Form form = new Form();
@@ -103,14 +102,13 @@ namespace Bloom.Publish.BloomPub.wifi
             }
             catch (Exception e)
             {
-                //Debug.WriteLine("WM, WiFiAdvertiserQR::Work, exception: {0}", e.ToString());
                 Debug.WriteLine("WM, WiFiAdvertiserQR::Work, exception: " + e.ToString());
             }
 
             Debug.WriteLine("WM, WiFiAdvertiserQR::Work, exited QR advertising loop, NOT GOOD"); // WM, temporary
         }
 
-        public static void SendCallback(IAsyncResult args) { }   // WHAT IS THIS FOR? REMOVE?
+        public static void SendCallback(IAsyncResult args) { }   // WHAT IS THIS FOR? CAN REMOVE?
 
         public void Stop()
         {

@@ -55,7 +55,7 @@ namespace Bloom.Publish.BloomPub.wifi
         // but nothing between 5900 and 5931. Decided to use a number similar to ChorusHub.
         private const int Port = 5913; // must match port in BloomReader NewBookListenerService.startListenForUDPBroadcast
         private string _currentIpAddress;
-        private string _cachedIpAddress;
+        private string _cachedIpAddress = "";
         private byte[] _sendBytes; // Data we send in each advertisement packet
         private readonly WebSocketProgress _progress;
 
@@ -171,22 +171,11 @@ namespace Bloom.Publish.BloomPub.wifi
         /// </summary>
         private void UpdateAdvertisementBasedOnCurrentIpAddress()
         {
-            Debug.WriteLine("WM, WiFiAdvertiser::UABOCIA, begin, _cachedIpAddress = " + _cachedIpAddress); // WM, temporary
             _currentIpAddress = GetIpAddressOfNetworkIface();
-            if (_cachedIpAddress == "") {
-                // The ZXing lib doesn't like empty fields but at startup the cached
-                // IP address is still empty. So to keep ZXing happy, fill it -- but
-                // not with the actual current address, else we'll skip the if-block
-                // and sendBytes[] won't get filled.
-                _cachedIpAddress = "1.2.3.4";
-                Debug.WriteLine("WM, WiFiAdvertiser::UABOCIA, _cachedIpAddress now = " + _cachedIpAddress); // WM, temporary
-            } else {
-                Debug.WriteLine("WM, WiFiAdvertiser::UABOCIA, didn't need to touch _cachedIpAddress"); // WM, temporary
-            }
             if (_cachedIpAddress != _currentIpAddress)
             {
+                Debug.WriteLine("WM, WiFiAdvertiser::UABOCIA, update cached IP addr from " + _cachedIpAddress + " to " + _currentIpAddress); // WM, temporary
                 _cachedIpAddress = _currentIpAddress;   // save snapshot of our new IP address
-                //dynamic advertisement = new DynamicJson();  -- put up to class scope
                 advertisement.title = BookTitle;
                 advertisement.version = BookVersion;
                 advertisement.language = TitleLanguage;
