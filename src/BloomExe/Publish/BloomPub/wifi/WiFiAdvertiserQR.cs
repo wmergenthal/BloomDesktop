@@ -4,6 +4,7 @@ using System.Drawing;
 using System.Threading;
 using System.Windows.Forms;
 using Bloom.Api;
+//using Bloom.MiscUI;  // for BloomMessageBox, possible alternative for PictureBox
 using ZXing;
 
 namespace Bloom.Publish.BloomPub.wifi
@@ -51,7 +52,7 @@ namespace Bloom.Publish.BloomPub.wifi
             // 
             // QUESTION: instead of determining that an advert is empty by looking for
             // "{}", should we look for a string length that is too small to be valid?
-            AdvertToShowAsQrCode = _wiFiAdvertiserUdp.GetAdvertString();
+            AdvertToShowAsQrCode = _wiFiAdvertiserUdp.ShareAdvertString();
             if (AdvertToShowAsQrCode == "{}")
             {
                 Debug.WriteLine("WM, WiFiAdvertiserQR::generateAndDisplayQR, no advert yet, bail");
@@ -71,13 +72,14 @@ namespace Bloom.Publish.BloomPub.wifi
                 }
             };
 
-            Debug.WriteLine("WM, WiFiAdvertiserQR::generateAndDisplayQR, generating QR with " + AdvertToShowAsQrCode); // WM, temporary
+            //Debug.WriteLine("WM, WiFiAdvertiserQR::generateAndDisplayQR, generating QR with " + AdvertToShowAsQrCode); // WM, temporary
             var matrix = writer.Write(AdvertToShowAsQrCode);
             var qrBitmap = new Bitmap(matrix);
             qrBox.Image = qrBitmap;
             qrBox.Dock = DockStyle.Fill;
 
             // QR code is created; now display it.
+            Debug.WriteLine("WM, WiFiAdvertiserQR::generateAndDisplayQR, displaying QR advert ({0} bytes)", AdvertToShowAsQrCode.Length); // WM, temporary
             Form form = new Form();
             form.Text = "Scan this QR code with BloomReader";
             form.Controls.Add(qrBox);
@@ -104,8 +106,6 @@ namespace Bloom.Publish.BloomPub.wifi
             {
                 Debug.WriteLine("WM, WiFiAdvertiserQR::Work, exception: " + e.ToString());
             }
-
-            Debug.WriteLine("WM, WiFiAdvertiserQR::Work, exited QR advertising loop, NOT GOOD"); // WM, temporary
         }
 
         public static void SendCallback(IAsyncResult args) { }   // WHAT IS THIS FOR? CAN REMOVE?

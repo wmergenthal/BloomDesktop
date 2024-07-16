@@ -9,9 +9,6 @@ using System.Threading;
 using System.Windows.Forms;
 using Bloom.Api;
 using Bloom.web;
-using Bloom.MiscUI;  // for BloomMessageBox
-//using SIL.Progress;
-using ZXing;
 using System.Drawing.Imaging;
 
 namespace Bloom.Publish.BloomPub.wifi
@@ -26,6 +23,7 @@ namespace Bloom.Publish.BloomPub.wifi
         public string BookTitle;
         private string _bookVersion;
         dynamic advertisement = new DynamicJson();
+        private Boolean advertStringIsReady = false;
 
         public string BookVersion
         {
@@ -39,11 +37,6 @@ namespace Bloom.Publish.BloomPub.wifi
             }
         }
         public string TitleLanguage;
-
-        public string GetAdvertString()
-        {
-            return advertisement.ToString();
-        }
 
         private UdpClient _client;
         private Thread _thread;
@@ -62,6 +55,19 @@ namespace Bloom.Publish.BloomPub.wifi
         internal WiFiAdvertiser(WebSocketProgress progress)
         {
             _progress = progress;
+        }
+
+        // The QR advertising thread calls here to get a copy of the current advertising
+        // string. This string will be displayed on the Bloom Desktop screen as a QR code.
+        // The UDP advert and QR code must contain the exact same data.
+        public string ShareAdvertString()
+        {
+            if (advertStringIsReady == true) {
+                return advertisement.ToString();
+            } else {
+                Debug.WriteLine("WM, WiFiAdvertiser::ShareAdvertString, advert not ready"); // WM, temporary
+                return "{}";
+            }
         }
 
         public void Start()
@@ -86,40 +92,6 @@ namespace Bloom.Publish.BloomPub.wifi
                 message: "Advertising book to Bloom Readers on local network..."
             );
 
-            // Generate QR code with our IP address and display it
-            // This code based on AndroidSyncDialog.cs in HearThis.
-            // HearThis uses 'ZXing' so we do too, which requires a 'using'
-            // statement above and adding package 'ZXing.Net' to BloomExe.csproj.
-            //var qrBox = new PictureBox();
-            //qrBox.Height = 225;  // tweak as desired
-            //qrBox.Width = 225;   // tweak as desired
-            //var writer = new BarcodeWriter
-            //{
-            //    Format = BarcodeFormat.QR_CODE,
-            //    Options =
-            //    {
-            //        Height = qrBox.Height,
-            //        Width = qrBox.Width
-            //    }
-            //};
-            ////string _ourIpAddress = GetIpAddressOfNetworkIface();
-            ////var matrix = writer.Write(_ourIpAddress);
-            //UpdateAdvertisementBasedOnCurrentIpAddress();  // sets data in 'advertisement'
-            //// TODO: ensure that UDP advert has same content as QR code
-            ////       put QR code display in a separate thread if possible, because regular
-            ////       UDP adverts don't occur while the QR code is being displayed
-            //var matrix = writer.Write(advertisement.ToString());
-            //var qrBitmap = new Bitmap(matrix);
-            //qrBox.Image = qrBitmap;
-            //qrBox.Dock = DockStyle.Fill;
-            //Debug.WriteLine("WM, WiFiAdvertiser::Work, QR code ready, now display it"); // WM, temporary
-            //
-            //// QR code created; now display it.
-            //Form form = new Form();
-            //form.Text = "Scan this QR code with BloomReader";
-            //form.Controls.Add(qrBox);
-            //Application.Run(form);
-
             Debug.WriteLine("WM, WiFiAdvertiser::Work, begin UDP advertising loop"); // WM, temporary
             try
             {
@@ -128,7 +100,7 @@ namespace Bloom.Publish.BloomPub.wifi
                     if (!Paused)
                     {
                         UpdateAdvertisementBasedOnCurrentIpAddress();
-                        Debug.WriteLine("WM, WiFiAdvertiser::Work, broadcasting advert ({0} bytes) on port {1}", _sendBytes.Length, Port); // WM, temporary
+                        Debug.WriteLine("WM, WiFiAdvertiser::Work, broadcasting UDP advert ({0} bytes) on port {1}", _sendBytes.Length, Port); // WM, temporary
                         _client.BeginSend(
                             _sendBytes,
                             _sendBytes.Length,
@@ -174,6 +146,11 @@ namespace Bloom.Publish.BloomPub.wifi
             _currentIpAddress = GetIpAddressOfNetworkIface();
             if (_cachedIpAddress != _currentIpAddress)
             {
+                // Race condition: QR advertising thread might grab the advert string before
+                // it's complete. If that happens this flag will ensure that the string it gets,
+                // via ShareAdvertString(), is recognizably invalid.
+                advertStringIsReady = false;
+
                 Debug.WriteLine("WM, WiFiAdvertiser::UABOCIA, update cached IP addr from " + _cachedIpAddress + " to " + _currentIpAddress); // WM, temporary
                 _cachedIpAddress = _currentIpAddress;   // save snapshot of our new IP address
                 advertisement.title = BookTitle;
@@ -182,6 +159,9 @@ namespace Bloom.Publish.BloomPub.wifi
                 advertisement.protocolVersion = WiFiPublisher.ProtocolVersion;
                 advertisement.sender = System.Environment.MachineName;
                 advertisement.senderIP = _currentIpAddress;
+
+                // Advert is complete.
+                advertStringIsReady = true;
 
                 _sendBytes = Encoding.UTF8.GetBytes(advertisement.ToString());
                 //EventLog.WriteEntry("Application", "Serving at http://" + _currentIpAddress + ":" + ChorusHubOptions.MercurialPort, EventLogEntryType.Information);
@@ -224,12 +204,11 @@ namespace Bloom.Publish.BloomPub.wifi
         // multiple IP addresses (mine has 9, a mix of both IPv4 and IPv6), we must be judicious in selecting the
         // one that will actually be used by network interface. Unfortunately, GetLocalIpAddress() does not always
         // return the correct address.
-        // BloomReaderTCPListener.ListenForTCPMessages() implements a mechanims that does. That code provides the
+        // BloomReaderTCPListener.ListenForTCPMessages() implements a mechanism that does. That code provides the
         // basis for this function, and also describes how the mechanism works.
         // This function is static so that other code can use it too (I thought at first that ListenForTCPMessages()
-        // could call it, but not so - it needs a more complex return type). Future code, which must be in namespace
-        // 'Bloom.Publish.BloomPub.wifi', could call into here like this:
-        //      string ipAddr = WiFiAdvertiser.GetIpAddressOfNetworkIface();
+        // could call it, but not so - it needs a more complex return type). Future code, which would be in namespace
+        // 'Bloom.Publish.BloomPub.wifi', could call into here.
         public static string GetIpAddressOfNetworkIface()
         {
             IPEndPoint endpoint;
