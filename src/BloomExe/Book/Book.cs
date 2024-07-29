@@ -725,7 +725,9 @@ namespace Bloom.Book
             // Seems safest to make a list so we're not modifying the document while iterating through it.
             var pagesToDelete = new List<SafeXmlElement>();
             foreach (
-                SafeXmlElement node in bookDom.SafeSelectNodes("//div[contains(@class, 'bloom-page')]")
+                SafeXmlElement node in bookDom.SafeSelectNodes(
+                    "//div[contains(@class, 'bloom-page')]"
+                )
             )
             {
                 if (pageSelectingPredicate(node))
@@ -1504,7 +1506,9 @@ namespace Bloom.Book
             var layoutOfThisBook = GetLayout();
             var bookPath = BloomFileLocator.GetFactoryBookTemplateDirectory(updateTo.Path);
             var templateDoc = XmlHtmlConverter.GetXmlDomFromHtmlFile(bookPath, false);
-            var newPage = templateDoc.SafeSelectNodes("//div[@id='" + updateTo.Guid + "']")[0] as SafeXmlElement;
+            var newPage =
+                templateDoc.SafeSelectNodes("//div[@id='" + updateTo.Guid + "']")[0]
+                as SafeXmlElement;
             var classesToDrop = new[]
             {
                 "imageWholePage",
@@ -2109,7 +2113,9 @@ namespace Bloom.Book
             const string classNoStyleMods = "bloom-userCannotModifyStyles";
             const string classNoAudio = "bloom-noAudio";
 
-            var questionNodes = bookDOM.Body.SafeSelectNodes("//div[contains(@class,'quizContents')]");
+            var questionNodes = bookDOM.Body.SafeSelectNodes(
+                "//div[contains(@class,'quizContents')]"
+            );
             foreach (SafeXmlElement quizContentsElement in questionNodes)
             {
                 if (!quizContentsElement.HasClass("bloom-noAudio")) // Needs migration
@@ -2965,7 +2971,9 @@ namespace Bloom.Book
         public bool HasFullAudioCoverage()
         {
             // REVIEW: should any of the xmatter pages be checked (front cover, title, credits?)
-            foreach (var divWantPage in RawDom.SafeSelectNodes("//div[@class]").Cast<SafeXmlElement>())
+            foreach (
+                var divWantPage in RawDom.SafeSelectNodes("//div[@class]").Cast<SafeXmlElement>()
+            )
             {
                 if (!divWantPage.HasClass("numberedPage"))
                     continue;
@@ -3365,7 +3373,10 @@ namespace Bloom.Book
         {
             //review: could move to page
             var pageElement = OurHtmlDom.RawDom.SelectSingleNodeHonoringDefaultNS(page.XPathToDiv);
-            Require.That(pageElement != null, "FindPageDiv could not find page: " + page.XPathToDiv);
+            Require.That(
+                pageElement != null,
+                "FindPageDiv could not find page: " + page.XPathToDiv
+            );
 
             return pageElement as SafeXmlElement;
         }
@@ -3456,6 +3467,19 @@ namespace Bloom.Book
 
             //similarly, if the page has stylesheet files we don't have, copy them
             CopyMissingStylesheetFiles(templatePage);
+
+            // Copy correct and wrong sound files, if any, and if we don't already have them.
+            // Review: do we want to copy anyway and rename if already found? It guards against the
+            // possibility of two different sounds with the same name, but this seems unlikely,
+            // and it's a waste to have lots of copies of the same file when there is no built-in
+            // way to edit it, unlike sound recordings that can be re-recorded or pictures that
+            // can be clipped.
+            CopyMissingSoundFile(templatePage, "data-correct-sound");
+            CopyMissingSoundFile(templatePage, "data-wrong-sound");
+            foreach (SafeXmlElement soundElt in newPageDiv.SafeSelectNodes(".//div[@data-sound]"))
+            {
+                CopyMissingSoundFile(soundElt, "data-sound", templatePage.Book.FolderPath);
+            }
 
             // and again for scripts (but we currently only worry about ones in the page itself)
             foreach (SafeXmlElement scriptElt in newPageDiv.SafeSelectNodes(".//script[@src]"))
@@ -3569,6 +3593,49 @@ namespace Bloom.Book
             HtmlDom.CopyMissingStylesheetFiles(sourceDom, sourceFolder, destFolder);
         }
 
+        private void CopyMissingSoundFile(IPage templatePage, string attrName)
+        {
+            CopyMissingSoundFile(
+                templatePage.GetDivNodeForThisPage(),
+                attrName,
+                templatePage.Book.FolderPath
+            );
+        }
+
+        private void CopyMissingSoundFile(
+            SafeXmlElement sourceElt,
+            string attrName,
+            string templateBookFolderPath
+        )
+        {
+            var fileName = sourceElt.GetAttribute(attrName);
+            if (string.IsNullOrEmpty(fileName))
+                return;
+            var destPath = Path.Combine(FolderPath, "audio", fileName);
+            if (RobustFile.Exists(destPath))
+                return;
+
+            var sourcePath = Path.Combine(templateBookFolderPath, "audio", fileName);
+            Directory.CreateDirectory(Path.GetDirectoryName(destPath));
+            if (RobustFile.Exists(sourcePath))
+                RobustFile.Copy(sourcePath, destPath);
+            else
+            {
+                // maybe a built-in sound? We could build these into BloomPlayer so we don't
+                // need to embed them in books, but then BP's sound list has to be kept up-to-date,
+                // and it costs us space in the BP installer instead of in books, and extra complexity
+                // in BP and when playing games here.
+                sourcePath = Path.Combine(
+                    FileLocationUtilities.DirectoryOfApplicationOrSolution,
+                    BloomFileLocator.BrowserRoot,
+                    "sounds",
+                    fileName
+                );
+                if (RobustFile.Exists(sourcePath))
+                    RobustFile.Copy(sourcePath, destPath);
+            }
+        }
+
         /// <summary>
         /// If we are inserting a page from a different book, or updating the layout of our page to one from a
         /// different book, we may need to copy user-defined styles from that book to our own.
@@ -3642,11 +3709,7 @@ namespace Bloom.Book
 
         private void CopyAndRenameAudioFiles(SafeXmlElement newpageDiv, string sourceBookFolder)
         {
-            foreach (
-                var audioElement in HtmlDom
-                    .SelectRecordableDivOrSpans(newpageDiv)
-                    .ToList()
-            )
+            foreach (var audioElement in HtmlDom.SelectRecordableDivOrSpans(newpageDiv).ToList())
             {
                 var oldId = audioElement.GetAttribute("id");
                 var id = HtmlDom.SetNewHtmlIdValue(audioElement);
@@ -3675,11 +3738,7 @@ namespace Bloom.Book
 
         private void CopyAndRenameVideoFiles(SafeXmlElement newpageDiv, string sourceBookFolder)
         {
-            foreach (
-                var source in newpageDiv
-                    .SafeSelectNodes(".//video/source")
-                    .ToList()
-            )
+            foreach (var source in newpageDiv.SafeSelectNodes(".//video/source").ToList())
             {
                 var src = source.GetAttribute("src");
                 // old source may have a param, too, but we don't currently need to keep it.
@@ -4191,8 +4250,7 @@ namespace Bloom.Book
                     )
                 )
                 {
-                    var importedPage = (SafeXmlElement)
-                        printingDom.RawDom.ImportNode(pageDiv, true);
+                    var importedPage = (SafeXmlElement)printingDom.RawDom.ImportNode(pageDiv, true);
 
                     if (!String.IsNullOrWhiteSpace(importedPage.GetAttribute("data-page-number")))
                     {
@@ -4322,7 +4380,9 @@ namespace Bloom.Book
             var language1Tag = Language1Tag;
             var language2Tag = Language2Tag;
             var language3Tag = Language3Tag;
-            foreach (SafeXmlElement div in dom.SafeSelectNodes("//div[contains(@class,'bloom-page')]"))
+            foreach (
+                SafeXmlElement div in dom.SafeSelectNodes("//div[contains(@class,'bloom-page')]")
+            )
             {
                 TranslationGroupManager.PrepareElementsInPageOrDocument(div, _bookData);
                 TranslationGroupManager.UpdateContentLanguageClasses(
@@ -4466,6 +4526,9 @@ namespace Bloom.Book
             }
 
             RemoveObsoleteSoundAttributes(OurHtmlDom);
+            // Note that at this point _bookData has already been updated with the edited page's data, if any.
+            // This will take priority over other data it finds in the book, even earlier in the book
+            // than the edited page.
             _bookData.UpdateVariablesAndDataDivThroughDOM(BookInfo); //will update the title if needed
             if (OkToChangeFileAndFolderName)
             {
@@ -5027,7 +5090,9 @@ namespace Bloom.Book
         public void SetAnimationDurationsFromAudioDurations()
         {
             foreach (
-                SafeXmlElement page in RawDom.SafeSelectNodes("//div[contains(@class,'bloom-page')]")
+                SafeXmlElement page in RawDom.SafeSelectNodes(
+                    "//div[contains(@class,'bloom-page')]"
+                )
             )
             {
                 // For now we only apply this to the first image container.

@@ -95,7 +95,7 @@ namespace Bloom.Book
         string Duplicate();
         IEnumerable<string> GetNarrationAudioFileNamesReferencedInBook(bool includeWav);
         IEnumerable<string> GetBackgroundMusicFileNamesReferencedInBook();
-        string GetSupportingFile(string relativePath);
+        string GetSupportingFile(string relativePath, bool useInstalledBranding = false);
         void EnsureOriginalTitle();
         bool LinkToLocalCollectionStyles { get; set; }
 
@@ -252,11 +252,18 @@ namespace Bloom.Book
         private string _cachedFolderPath;
         private string _cachedPathToHtml;
 
-        public string GetSupportingFile(string relativePath)
+        public string GetSupportingFile(string relativePath, bool useInstalledBranding = false)
         {
-            var localPath = Path.Combine(FolderPath, relativePath);
+            if (useInstalledBranding && relativePath == "branding.css")
+            {
+                return BloomFileLocator.GetOptionalBrandingFile(
+                    _collectionSettings.BrandingProjectKey,
+                    "branding.css"
+                );
+            }
             if (BookStorage.CssFilesThatAreDynamicallyUpdated.Contains(relativePath))
             {
+                var localPath = Path.Combine(FolderPath, relativePath);
                 if (RobustFile.Exists(localPath))
                 {
                     return localPath;
@@ -1045,6 +1052,15 @@ namespace Bloom.Book
                 BloomDesktopMinVersion = "5.5",
                 BloomReaderMinVersion = "1.0",
                 XPath = "//span[contains(@class,'bloom-audio-split-marker')]"
+            },
+            new Feature()
+            {
+                FeatureId = "bloomGames6.1",
+                FeaturePhrase = "Bloom Games added in 6.1",
+                BloomDesktopMinVersion = "6.1",
+                BloomReaderMinVersion = "3.3",
+                XPath =
+                    "//div[@data-activity='drag-letter-to-target' or @data-activity='drag-image-to-target' or @data-activity='drag-sort-sentence' ]"
             }
         };
 
@@ -1304,6 +1320,22 @@ namespace Bloom.Book
             var backgroundMusicFileNames = GetBackgroundMusicFileNamesReferencedInBook();
             usedAudioFileNames.AddRange(backgroundMusicFileNames);
 
+            var activityPages = Dom.SafeSelectNodes("//div[@data-activity]");
+            foreach (SafeXmlElement dap in activityPages)
+            {
+                var correctSound = dap.GetAttribute("data-correct-sound");
+                var wrongSound = dap.GetAttribute("data-wrong-sound");
+                if (correctSound != null)
+                    usedAudioFileNames.Add(correctSound);
+                if (wrongSound != null)
+                    usedAudioFileNames.Add(wrongSound);
+                var dataSoundElts = dap.SafeSelectNodes(".//div[@data-sound]");
+                foreach (var ds in dataSoundElts)
+                {
+                    usedAudioFileNames.Add(ds.GetAttribute("data-sound"));
+                }
+            }
+
             // Don't get too trigger-happy with the delete button if you're not in publish mode
             if (!isForPublish)
             {
@@ -1385,12 +1417,11 @@ namespace Bloom.Book
             HashSet<string> langsToExclude
         )
         {
-            var narrationElements = HtmlDom
-                .SelectChildNarrationAudioElements(
-                    Dom.RawDom.DocumentElement,
-                    includeSplitTextBoxAudio,
-                    langsToExclude
-                );
+            var narrationElements = HtmlDom.SelectChildNarrationAudioElements(
+                Dom.RawDom.DocumentElement,
+                includeSplitTextBoxAudio,
+                langsToExclude
+            );
             var narrationIds = narrationElements
                 .Select(node => node.GetOptionalStringAttribute("id", null))
                 .Where(id => id != null);
@@ -1543,7 +1574,9 @@ namespace Bloom.Book
         internal static List<string> GetVideoPathsRelativeToBook(SafeXmlElement element)
         {
             return (
-                from SafeXmlElement videoContainerElements in HtmlDom.SelectChildVideoElements(element)
+                from SafeXmlElement videoContainerElements in HtmlDom.SelectChildVideoElements(
+                    element
+                )
                 select HtmlDom.GetVideoElementUrl(videoContainerElements).PathOnly.NotEncoded
             )
                 .Where(path => !String.IsNullOrEmpty(path))
@@ -2400,7 +2433,10 @@ namespace Bloom.Book
             InitialLoadErrors = "";
         }
 
-        private bool TryGetValidXmlDomFromHtmlFile(string path, out SafeXmlDocument xmlDomFromHtmlFile)
+        private bool TryGetValidXmlDomFromHtmlFile(
+            string path,
+            out SafeXmlDocument xmlDomFromHtmlFile
+        )
         {
             xmlDomFromHtmlFile = null;
             if (!RobustFile.Exists(path))
@@ -2852,7 +2888,10 @@ namespace Bloom.Book
                 // var documentTime = RobustFile.GetLastWriteTimeUtc(documentPath);
                 if (Platform.IsWindows) // See BL-13577.
                 {
-                    if (sourcePathIncludingFileName.ToLowerInvariant() == documentPath.ToLowerInvariant())
+                    if (
+                        sourcePathIncludingFileName.ToLowerInvariant()
+                        == documentPath.ToLowerInvariant()
+                    )
                         return; // no point in trying to update self!
                 }
                 else
@@ -3555,12 +3594,12 @@ namespace Bloom.Book
                 .Cast<SafeXmlElement>();
             foreach (var ic in imageContainers)
             {
-                var firstImage = ic.ChildNodes
-                    .FirstOrDefault(x => x is SafeXmlElement && ((SafeXmlElement)x).Name == "img");
+                var firstImage = ic.ChildNodes.FirstOrDefault(
+                    x => x is SafeXmlElement && ((SafeXmlElement)x).Name == "img"
+                );
                 if (firstImage == null)
                     continue;
-                var firstElement = ic.ChildNodes
-                    .FirstOrDefault(x => x is SafeXmlElement);
+                var firstElement = ic.ChildNodes.FirstOrDefault(x => x is SafeXmlElement);
                 if (firstElement != firstImage)
                 {
                     ic.InsertBefore(firstImage, firstElement);
@@ -3763,10 +3802,14 @@ namespace Bloom.Book
 
             if (!justOldCustomFiles)
             {
+                // We want to check the branding.css file from the Bloom installation, not the one in the book folder.
+                // The one in the book folder may still be from a previous version of Bloom.
+                // After the compatibility check, we will copy the one from the Bloom installation into the book folder.
+                // (xmatter below follows a similar pattern since GetSupportFile always returns the installed xmatter.)
                 result.Add(
                     Tuple.Create(
-                        GetSupportingFile("branding.css"),
-                        GetSupportingFileString("branding.css")
+                        GetSupportingFile("branding.css", useInstalledBranding: true),
+                        GetSupportingFileString("branding.css", useInstalledBranding: true)
                     )
                 );
                 result.Add(
@@ -3793,11 +3836,11 @@ namespace Bloom.Book
             return result.ToArray();
         }
 
-        private string GetSupportingFileString(string file)
+        private string GetSupportingFileString(string file, bool useInstalledBranding = false)
         {
             // Do the search for the file that UpdateSupportingFiles will copy into the book
             // folder, since this is called BEFORE we do that.
-            var path = GetSupportingFile(file);
+            var path = GetSupportingFile(file, useInstalledBranding);
             if (RobustFile.Exists(path))
                 return RobustFile.ReadAllText(path);
             return null;
@@ -3970,9 +4013,7 @@ namespace Bloom.Book
             var marginBox = GetMarginBox(page);
             if (marginBox == null)
                 return true; // marginBox should not be missing
-            var internalNodes = marginBox.ChildNodes
-                .Where(x => x is SafeXmlElement)
-                .ToList();
+            var internalNodes = marginBox.ChildNodes.Where(x => x is SafeXmlElement).ToList();
             if (internalNodes.Count == 0)
             {
                 return true; // marginBox should not be empty
@@ -3996,9 +4037,7 @@ namespace Bloom.Book
         static SafeXmlElement GetMarginBox(SafeXmlElement parent)
         {
             foreach (
-                SafeXmlElement child in parent.ChildNodes
-                    .Where(x => x is SafeXmlElement)
-                    .Reverse()
+                SafeXmlElement child in parent.ChildNodes.Where(x => x is SafeXmlElement).Reverse()
             )
             {
                 if (child.GetAttribute("class").Contains("marginBox"))
