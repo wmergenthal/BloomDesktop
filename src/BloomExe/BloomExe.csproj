@@ -216,6 +216,9 @@ copy /Y "$(SolutionDir)\lib\dotnet\libtidy.dll" $(OutDir)
 			<PrivateAssets>all</PrivateAssets>
 			<IncludeAssets>runtime; build; native; contentfiles; analyzers</IncludeAssets>
 		</PackageReference>
+		<PackageReference Include="ZXing.Net">
+			<Version>0.16.9</Version>
+		</PackageReference>
 	</ItemGroup>
 	<ItemGroup>
 		<Reference Include="PresentationCore" />
