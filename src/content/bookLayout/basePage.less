@@ -172,8 +172,11 @@ div.ui-tooltip-content {
     // Canva for very small imagesto help with that. But any min-height causes weird behavior when cropping
     // makes the bubble smaller than the image-container is allowed to be. So try not setting one at all.
     // We also have code to prevent them getting smaller than 30px, but setting an actual CSS min-height is problematic
-    // when the cropping code is trying to compute very exact sizes. I think we're better off without it.
-    // min-height: 10px;
+    // when the cropping code is trying to compute very exact sizes. I think we're better off without a min-height.
+    // However, when imageContainer has no height or min-height set at all, for some reason auto-sizing it with
+    // flex-grow (e.g., on the cover page) combined with auto-sizing the image inside it with content-fit doesn't work.
+    // A min-height of zero somehow fixes that without interfering with cropping. So that's what we're doing for now.
+    min-height: 0;
     border-radius: var(--image-border-radius);
     // image containers are ordered by document order so they can NOT be a stacking context,
     // allowing their child buttons to be over the comicaljs canvas
@@ -643,6 +646,12 @@ div[data-book*="branding"] {
     }
 }
 
+// the extra specificity here is to win out over the legacy (but still active) cover-color rule in the html itself
+// As of 6.1 this is only used for Angola branding
+div.bloom-page.coverColor {
+    background-color: var(--cover-background-color) !important;
+}
+
 // --------------------------------------------------------------------------------------
 // pages that are symmetrical left vs. right, so that we only use --page-margin-left
 // (or --cover-margin-side).
@@ -813,8 +822,8 @@ The buffer would be absent if the marginBox had a border or the page has a backg
     }
     // And now some special cases where we DO want it on blocks that are more deeply nested.
 
-    // This one handles the a text box at the bottom of a picture-in-middle page or similar layout
-    // (including Big Text Diglot).
+    // Set padding above a bottom text that is nested two layers deep in origami
+    //     Matches include: built-in "picture-in-middle" page & Big Text Diglot
     &
         > .split-pane.horizontal-percent
         > .split-pane-component.position-bottom
@@ -822,12 +831,38 @@ The buffer would be absent if the marginBox had a border or the page has a backg
         > .split-pane.horizontal-percent
         > .split-pane-component.position-bottom
         > .split-pane-component-inner
-        > .bloom-translationGroup {
+        > .bloom-translationGroup,
+    //      Matches include: Start with image on bottom, split the image to have a text below it. (e.g. Angola project's bilingual template)
+    //       (note, this varies just slightly from the built-in "picture-in-middle" page above by having one fewer split-pane-component-inner layer)
+    &
+        > .split-pane.horizontal-percent
+        > .split-pane-component.position-bottom
+        > .split-pane.horizontal-percent
+        > .split-pane-component.position-bottom
+        > .split-pane-component-inner
+        > .bloom-translationGroup
+        //, ENHANCE: could put other patterns in here too that give you the same layout visually
+ {
         padding-top: var(--topLevel-text-padding-top);
         .mixinLeftTgPadding;
         .mixinRightTgPadding;
         .mixinBottomTgPadding;
     }
+
+    // Start with image on top, split the image to have text above it. (visually the same as picture-in-middle)
+    &
+        > .split-pane.horizontal-percent
+        > .split-pane-component.position-top
+        > .split-pane.horizontal-percent
+        > .split-pane-component.position-top
+        > .split-pane-component-inner
+        > .bloom-translationGroup {
+        .mixinTopTgPadding;
+        .mixinLeftTgPadding;
+        .mixinRightTgPadding;
+        padding-bottom: var(--topLevel-text-padding-bottom);
+    }
+
     // This one handles the text box at the bottom left of a Big Video Diglot.
     // Review: it's not obvious what to do about the outer edges here. In the simpler cases,
     // we DO have outer-edge padding when there is no other margin and the top-level split is vertical.

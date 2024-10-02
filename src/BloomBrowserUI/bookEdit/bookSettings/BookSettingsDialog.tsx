@@ -153,16 +153,11 @@ export const BookSettingsDialog: React.FunctionComponent<{
     );
     */
 
-    /* unused so far
-    const coverBackgroundLabel = useL10n(
-        "Cover Background",
-        "BookSettings.CoverBackground"
+    const coverBackgroundColorLabel = useL10n(
+        "Background Color",
+        "Common.BackgroundColor"
     );
-    const coverColorLabel = useL10n(
-        "Cover Color",
-        "PublishTab.Android.CoverColor" // reuse the same string localized for the Android tab
-    );
-    */
+
     const whatToShowOnCoverLabel = useL10n(
         "Front Cover",
         "BookSettings.WhatToShowOnCover"
@@ -191,6 +186,27 @@ export const BookSettingsDialog: React.FunctionComponent<{
     );
     const resolutionLabel = useL10n("Resolution", "BookSettings.Resolution");
     const bloomPubLabel = useL10n("eBooks", "PublishTab.bloomPUBButton"); // reuse the same string localized for the Publish tab
+
+    const advancedLayoutLabel = useL10n(
+        "Advanced Layout",
+        "BookSettings.AdvancedLayoutLabel"
+    );
+    const textPaddingLabel = useL10n(
+        "Text Padding",
+        "BookSettings.TopLevelTextPaddingLabel"
+    );
+    const textPaddingDescription = useL10n(
+        "Smart spacing around text boxes. Works well for simple pages, but may not suit custom layouts.",
+        "BookSettings.TopLevelTextPadding.Description"
+    );
+    const textPaddingDefaultLabel = useL10n(
+        "Default (set by Theme)",
+        "BookSettings.TopLevelTextPadding.DefaultLabel"
+    );
+    const textPadding1emLabel = useL10n(
+        "1em (font size)",
+        "BookSettings.TopLevelTextPadding.1emLabel"
+    );
 
     // This is a helper function to make it easier to pass the override information
     function getAdditionalProps<T>(
@@ -370,25 +386,18 @@ export const BookSettingsDialog: React.FunctionComponent<{
                         selectedGroupIndex={props.initiallySelectedGroupIndex}
                     >
                         <ConfigrGroup label={coverLabel} level={1}>
-                            {
-                                // This is not part of the group of four mutually exclusive messages above
-                            }
+                            {appearanceDisabled && (
+                                <NoteBox>
+                                    <Div l10nKey="BookSettings.ThemeDisablesOptionsNotice">
+                                        The selected page theme does not support
+                                        the following settings.
+                                    </Div>
+                                </NoteBox>
+                            )}
                             <ConfigrSubgroup
                                 label={whatToShowOnCoverLabel}
                                 path={`appearance`}
                             >
-                                {appearanceDisabled && (
-                                    <NoteBox
-                                        css={css`
-                                            margin-left: 20px;
-                                        `}
-                                    >
-                                        <Div l10nKey="BookSettings.ThemeDisablesOptionsNotice">
-                                            The selected page theme does not
-                                            support the following settings.
-                                        </Div>
-                                    </NoteBox>
-                                )}
                                 <FieldVisibilityGroup
                                     field="cover-title"
                                     labelFrame="Show Title in {0}"
@@ -417,21 +426,19 @@ export const BookSettingsDialog: React.FunctionComponent<{
                                     )}
                                 />
                             </ConfigrSubgroup>
-                            {/* <ConfigrSubgroup
-                                label={
-                                    coverBackgroundLabel +
-                                    "  (Not implemented yet)"
-                                }
+                            <ConfigrSubgroup
+                                label={"All Cover Pages"}
                                 path={`appearance`}
                             >
                                 <ConfigrCustomStringInput
-                                    path={`appearance.coverColor`}
-                                    disabled={true} //  We need more work to switch to allowing appearance CSS to control the book cover.
-                                    //There is a work-in-progress branch called "CoverColorManager" that has my work on this.
-                                    label={coverColorLabel}
+                                    label={coverBackgroundColorLabel}
                                     control={ColorPickerForConfigr}
+                                    disabled={appearanceDisabled}
+                                    {...getAdditionalProps<string>(
+                                        `cover-background-color`
+                                    )}
                                 />
-                            </ConfigrSubgroup> */}
+                            </ConfigrSubgroup>
                             {/*
 
                             <ConfigrSubgroup
@@ -584,6 +591,31 @@ export const BookSettingsDialog: React.FunctionComponent<{
                                     }
                                     disabled={false}
                                     getAdditionalProps={getAdditionalProps}
+                                />
+                            </ConfigrSubgroup>
+                            <ConfigrSubgroup
+                                label={advancedLayoutLabel}
+                                path={`appearance`}
+                            >
+                                <ConfigrSelect
+                                    label={textPaddingLabel}
+                                    options={[
+                                        {
+                                            label: textPaddingDefaultLabel,
+                                            value: "" // use whatever the theme provides
+                                        },
+                                        { label: "0mm", value: "0mm" },
+                                        { label: "2mm", value: "2mm" },
+                                        { label: "4mm", value: "4mm" },
+                                        {
+                                            label: textPadding1emLabel,
+                                            value: "1em"
+                                        }
+                                    ]}
+                                    description={textPaddingDescription}
+                                    {...getAdditionalProps<string>(
+                                        `topLevel-text-padding`
+                                    )}
                                 />
                             </ConfigrSubgroup>
                         </ConfigrGroup>

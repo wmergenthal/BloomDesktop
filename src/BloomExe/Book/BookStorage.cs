@@ -10,6 +10,7 @@ using System.Security;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Web.UI.WebControls;
+using System.Windows.Forms;
 using System.Xml;
 using Bloom.Api;
 using Bloom.Collection;
@@ -1329,11 +1330,12 @@ namespace Bloom.Book
                     usedAudioFileNames.Add(correctSound);
                 if (wrongSound != null)
                     usedAudioFileNames.Add(wrongSound);
-                var dataSoundElts = dap.SafeSelectNodes(".//div[@data-sound]");
-                foreach (var ds in dataSoundElts)
-                {
-                    usedAudioFileNames.Add(ds.GetAttribute("data-sound"));
-                }
+            }
+            // These can now occur anywhere, not just in activity pages.
+            var dataSoundElts = Dom.SafeSelectNodes(".//div[@data-sound]");
+            foreach (var ds in dataSoundElts)
+            {
+                usedAudioFileNames.Add(ds.GetAttribute("data-sound"));
             }
 
             // Don't get too trigger-happy with the delete button if you're not in publish mode
@@ -1491,15 +1493,20 @@ namespace Bloom.Book
             //Collect up all the video files in our book's video directory
             var videoFolderPath = GetVideoFolderPath(FolderPath);
             var videoFilesToDeleteIfNotUsed = new List<string>();
-            const string videoExtension = ".mp4"; // .mov, .avi...?
+            var videoExtensions = new HashSet<string> { ".mp4", ".webm" }; // .mov, .avi...?
 
             if (Directory.Exists(videoFolderPath))
             {
-                foreach (
-                    var path in Directory.EnumerateFiles(videoFolderPath, "*" + videoExtension)
-                )
+                foreach (var videoExtension in videoExtensions)
                 {
-                    videoFilesToDeleteIfNotUsed.Add(Path.GetFileName(GetNormalizedPathForOS(path)));
+                    foreach (
+                        var path in Directory.EnumerateFiles(videoFolderPath, "*" + videoExtension)
+                    )
+                    {
+                        videoFilesToDeleteIfNotUsed.Add(
+                            Path.GetFileName(GetNormalizedPathForOS(path))
+                        );
+                    }
                 }
             }
 
@@ -1511,7 +1518,11 @@ namespace Bloom.Book
             {
                 if (Path.GetExtension(relativeFilePath).Length > 0)
                 {
-                    if (Path.GetExtension(relativeFilePath).ToLowerInvariant() == videoExtension)
+                    if (
+                        videoExtensions.Contains(
+                            Path.GetExtension(relativeFilePath).ToLowerInvariant()
+                        )
+                    )
                     {
                         videoFilesToDeleteIfNotUsed.Remove(
                             Path.GetFileName(GetNormalizedPathForOS(relativeFilePath))

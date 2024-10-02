@@ -11,7 +11,7 @@
     --page-structure-color: #1d94a41a;
     --language-tag-color: #1d94a488;
     --selectedEdit-color: #1d94a4c2; //transparent;
-    --unselectedEdit-color: var(--page-structure-color);
+    --unselectedEdit-color: #1d94a434; // page structure color, but 20% opacity instead of 10%
 }
 
 .bloom-page.cover {
@@ -40,7 +40,8 @@
 
 @EditBoxItemsColor: #0000001a;
 @MediumGray: #c0b9b9;
-@ImageAndVideoHoverOverlay: #d5d5e4;
+// For now we don't want this effect at all (BL-13895). Decided to keep the variable in case we change our minds.
+@ImageAndVideoHoverOverlay: transparent;
 @ImageButtonBorder: #716666;
 @ChangeImageButtonColor: @ControlColor;
 @PasteImageButtonColor: @bloom-blue;
@@ -126,8 +127,37 @@ body {
     -height: 1px;
 }
 
+// Now that most of our outline effects are conditional on the page being hovered, we get some sort of
+// default on a focused content-editable div. It's an ugly solid black. When we're not hovering,
+// we don't want any edit-only outlines at all, so the user can see the page as it will be.
+// So we have this rule to suppress that default outline.
+.bloom-page:not(:hover) .bloom-editable:focus {
+    outline: none !important;
+}
+
+// Keep together here all the effects we want when hovering (previously: also when focus-within)
+// the bloom-page. All of them need to also apply when the overlay context controls are hovered,
+// even though that is no longer a child of the bloom-page. (That's what the second rule is for.)
 .bloom-page:hover,
-.bloom-page:focus-within {
+body:has(#overlay-context-controls:hover) .bloom-page {
+    textarea,
+    div.bloom-editable,
+    div.pageLabel[contenteditable="true"] {
+        outline: thin solid var(--unselectedEdit-color);
+        outline-offset: -1px; // else the white of an un-focussed box can just bleed into the white of the margin
+    }
+    textarea:focus,
+    div.bloom-editable:focus,
+    div.pageLabel[contenteditable="true"]:focus {
+        outline: 1px solid var(--selectedEdit-color) !important;
+        outline-offset: -1px; // else the white of an un-focussed box can just bleed into the white of the margin
+        // box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1),
+        //     0 0 8px rgba(82, 168, 236, 0.6);
+    }
+    .bloom-textOverPicture div.bloom-editable:focus {
+        // editable in an overlay has the control frame, so any outline just produces a double border
+        outline: none !important;
+    }
     div.bloom-imageContainer {
         // Allow book templates to define a custom borderColor, otherwise fallback to the default color
         .borderOnTopOfElement(var(--page-structure-color));
@@ -142,19 +172,78 @@ body {
             .borderOnTopOfElement(@focusBorderColor);
         }
     }
+    .coverColor div.bloom-imageContainer {
+        .borderOnTopOfElement(rgba(1, 1, 1, 0.2));
+    }
+    #formatButton {
+        visibility: visible;
+
+        margin-left: 3px;
+        /*The font-size here is weird, but if we don't set it, the growing/shrinking font of the text will actually move the button up/down on the page*/
+        font-size: 10pt;
+        height: 20px;
+        width: 20px;
+        z-index: @formatButtonZIndex;
+
+        img {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+        }
+
+        &:hover {
+            color: black;
+        }
+    }
+    .qtip {
+        opacity: 1 !important;
+        transition: opacity 200ms ease-out;
+    }
+    /*Put in little grey language tooltips in the bottom-right of the editable divs*/
+    .languageTip,
+    .bloom-editable[contentEditable="true"][data-languageTipContent]:not([data-languageTipContent=""]):after {
+        position: absolute;
+        right: 0;
+        /*Same grey color as pageLabel*/
+        color: var(--language-tag-color); //rgba(0, 0, 0, 0.2);
+        font-family: @UIFontStack;
+        font-size: small;
+        font-style: normal;
+        font-weight: normal;
+        line-height: 1; //else it will draw up in the box somewhere if the font is large
+        text-shadow: none;
+        content: attr(data-languageTipContent);
+        bottom: 2px; // See Bl-10017
+        margin-right: 2px;
+    }
+    // show some structure when the page is hovered
+    // Show the padding, multilingual gap, etc as colored areas.
+    // The ".split-pane-component-inner >"  disables this for overlays, where it's common to have backgrounds like transparent
+    .split-pane-component-inner > .bloom-translationGroup {
+        // no: a border here will take up space, wrecking WYSIWYG
+        // border: solid thin var(--page-structure-color);
+        // box-sizing: border-box;
+        // Also, you'd think you could use outline instead, but it doesn't show on the side; the
+        // children over it up because they are the full width of this parent.
+
+        &:not(.bloom-background-gray) {
+            background-color: var(--page-structure-color) !important;
+        }
+
+        // the parent translation group has the "page structure" color so we
+        // normally want to have the edit box be white. Note however that in the case that
+        // we have a grey box, we're giving up on structure color and just want it all to be grey.
+        &:not(.bloom-background-gray) .bloom-editable {
+            background-color: var(--marginBox-background-color) !important;
+        }
+    }
 }
+
 // The editing buttons are hidden when this class is added (currently by motion and comic tools)
 .bloom-imageContainer.bloom-hideImageButtons {
     > .imageButton,
     > .miniButton {
         display: none;
-    }
-}
-
-.bloom-page:hover,
-.bloom-page:focus-within {
-    .coverColor div.bloom-imageContainer {
-        .borderOnTopOfElement(rgba(1, 1, 1, 0.2));
     }
 }
 
@@ -553,27 +642,20 @@ button.moveButton {
     background-size: contain;
 }
 
-.bloom-page:hover,
-.bloom-page:focus-within {
-    textarea,
-    div.bloom-editable,
-    div.pageLabel[contenteditable="true"] {
-        outline: thin solid var(--unselectedEdit-color);
-        /*[disabled]min-height:34px;*/
-    }
-}
-
 img.hoverUp {
-    background-color: @bloom-buff;
     outline: 1px outset black;
 }
 
-textarea:focus,
-div.bloom-editable:focus,
-div.pageLabel[contenteditable="true"]:focus {
-    outline: 1px solid var(--selectedEdit-color) !important;
-    // box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1),
-    //     0 0 8px rgba(82, 168, 236, 0.6);
+// I'm not sure why the rule above is !important, but this one has to be to beat it.
+// In edit mode we don't want such an automatic outline, because the control frame
+// provides one, and typically they don't even line up, becuase we grow the control
+// frame a little bit to prevent the side buttons overlapping text.
+// Note that, prior to 6.1, we also had two rules in bubble.less (in content) putting an outline
+// and shadow on a focused bloom-editable in an overlay. If we put that back for some
+// reason, we'll need a box-shadow:none (maybe !important) here because it looks wrong
+// with the wider control frame.
+.bloom-textOverPicture .bloom-editable:focus {
+    outline: none !important;
 }
 
 .bloom-editable:focus {
@@ -707,17 +789,6 @@ div.textWholePage ul {
     top: 45%;
 }
 
-.bloom-page:hover,
-.bloom-page:focus-within {
-    .marginBox {
-        // Put a faint border around the margin-box in edit mode.
-        // Not sure why, but it may be to give an idea of the space available for page content.
-        // Can't use border, that is controlled by appearance system
-        // Outline: 1px solid rgba(115, 189, 189, 0.3) is close, but can't make it follow border-radius
-        // This seems to do the job.
-        //box-shadow: 0 0 0 1px var(--page-structure-color);
-    }
-}
 .bloom-frontMatter div.marginBox {
     /*With the colored background, the margin border is just too distracting, and it doesn't (yet) help the user in any way because he can't move things around on the frontmatter*/
     border: none;
@@ -735,29 +806,7 @@ div.textWholePage ul {
     overflow: hidden;
     position: absolute;
 }
-.bloom-page:hover,
-.bloom-page:focus-within {
-    #formatButton {
-        visibility: visible;
 
-        margin-left: 3px;
-        /*The font-size here is weird, but if we don't set it, the growing/shrinking font of the text will actually move the button up/down on the page*/
-        font-size: 10pt;
-        height: 20px;
-        width: 20px;
-        z-index: @formatButtonZIndex;
-
-        img {
-            position: absolute;
-            bottom: 0;
-            left: 0;
-        }
-
-        &:hover {
-            color: black;
-        }
-    }
-}
 // Now sometimes, the format button lands under the page number.
 // Changing the z-index did not help. So we allow themes to "dodge" it.
 // Kind of a hack, I know. See BL-13206.
@@ -858,26 +907,6 @@ div.bloom-editable.Heading2-style {
 
 .languageTip {
     visibility: hidden;
-}
-.bloom-page:hover,
-.bloom-page:focus-within {
-    /*Put in little grey language tooltips in the bottom-right of the editable divs*/
-    .languageTip,
-    .bloom-editable[contentEditable="true"][data-languageTipContent]:not([data-languageTipContent=""]):after {
-        position: absolute;
-        right: 0;
-        /*Same grey color as pageLabel*/
-        color: var(--language-tag-color); //rgba(0, 0, 0, 0.2);
-        font-family: @UIFontStack;
-        font-size: small;
-        font-style: normal;
-        font-weight: normal;
-        line-height: 1; //else it will draw up in the box somewhere if the font is large
-        text-shadow: none;
-        content: attr(data-languageTipContent);
-        bottom: 2px; // See Bl-10017
-        margin-right: 2px;
-    }
 }
 
 .languageTip {
@@ -1219,42 +1248,6 @@ body.hideAllCKEditors .cke_chrome {
     opacity: 1 !important;
     transition: opacity 200ms ease-out;
 }
-body :has(.bloom-page:focus-within, .bloom-page:hover) {
-    .qtip {
-        opacity: 1 !important;
-        transition: opacity 200ms ease-out;
-    }
-}
-
-// --------------------------------------------------------
-// show some structure when the page is focused or hovered
-.bloom-page:focus-within,
-.bloom-page:hover {
-    // Show the padding, multilingual gap, etc as colored areas.
-    // The ".split-pane-component-inner >"  disables this for overlays, where it's common to have backgrounds like transparent
-    .split-pane-component-inner > .bloom-translationGroup {
-        // no: a border here will take up space, wrecking WYSIWYG
-        // border: solid thin var(--page-structure-color);
-        // box-sizing: border-box;
-        // Also, you'd think you could use outline instead, but it doesn't show on the side; the
-        // children over it up because they are the full width of this parent.
-
-        &:not(.bloom-background-gray) {
-            background-color: var(--page-structure-color) !important;
-        }
-
-        .bloom-editable {
-            outline: 1px solid var(--page-structure-color);
-            outline-offset: -1px; // else the white of an un-focussed box can just bleed into the white of the margin
-        }
-        // the parent translation group has the "page structure" color so we
-        // normally want to have the edit box be white. Note however that in the case that
-        // we have a grey box, we're giving up on structure color and just want it all to be grey.
-        &:not(.bloom-background-gray) .bloom-editable {
-            background-color: var(--marginBox-background-color) !important;
-        }
-    }
-}
 
 // ----- Bloom Games ----
 // Tweak the position of the Start/Correct/Wrong/Play control
@@ -1286,9 +1279,20 @@ body :has(.bloom-page:focus-within, .bloom-page:hover) {
     opacity: 40%; // dim a bit to make it look like a prompt.
 }
 
+canvas.moving {
+    cursor: move;
+}
+
+.bloom-textOverPicture:not(.bloom-focusedTOP) * {
+    cursor: default;
+}
+.bloom-textOverPicture.moving:not(.bloom-focusedTOP) * {
+    cursor: move;
+}
+
 @resizeHandleRadius: 8px;
-@cropHandleRadius: 4px;
-@cropHandleCenter: 6px;
+@sideHandleRadius: 4px;
+@sideHandleCenter: 6px;
 // We place this frame over each overlay to support resizing and cropping.
 // The frame itself is invisible (and ignores pointer events), but it provides a container
 // for the resize and crop handles and the toolbox below.
@@ -1303,28 +1307,51 @@ body :has(.bloom-page:focus-within, .bloom-page:hover) {
     // (except for the resize or crop control we are operating).
     &.moving {
         .bloom-ui-overlay-resize-handle,
-        .bloom-ui-overlay-crop-handle {
+        .bloom-ui-overlay-side-handle {
             display: none;
             &.active-control {
                 display: block;
             }
         }
+        &.bloom-ui-overlay-show-move-crop-handle {
+            .bloom-ui-overlay-move-crop-handle {
+                display: none;
+            }
+        }
+    }
+    // the "crop" handles on left and right are visible for text boxes
+    // (though with a different function).
+    &.has-text:not(.moving) {
+        .bloom-ui-overlay-side-handle-e,
+        .bloom-ui-overlay-side-handle-w {
+            display: block;
+        }
+        // the south one is visible for text boxes only when auto-height is turned off.
+        &.bloom-noAutoHeight .bloom-ui-overlay-side-handle-s {
+            display: block;
+        }
+        // Enhance: Canva uses these handles on text boxes to resize the box by modifying
+        // font size. This is nice for tweaking things but it's not clear how it should interact
+        // with our style system. For now we're just not showing them for text boxes.
+        .bloom-ui-overlay-resize-handle {
+            display: none;
+        }
     }
 
     // crop handles are, for now, only visible on images.
-    // Enahnce: Canva uses the horizontal ones on text boxes to resize the box by modifying
-    // font size. This is nice for tweaking things but it's not clear how it should interact
-    // with our style system.
-    .bloom-ui-overlay-crop-handle {
+    .bloom-ui-overlay-side-handle {
         display: none; // default
         &.active-control {
             display: block;
         }
     }
-    &.has-image:not(.moving) .bloom-ui-overlay-crop-handle {
+    &.has-image:not(.moving) .bloom-ui-overlay-side-handle {
         display: block;
     }
 
+    // The resize handles are the small circles in the four corners.
+    // The move crop handle is the small circle in the center, used to change how an
+    // image is cropped by (apparently) moving the image within the frame.
     .bloom-ui-overlay-resize-handle,
     .bloom-ui-overlay-move-crop-handle {
         position: absolute;
@@ -1374,11 +1401,13 @@ body :has(.bloom-page:focus-within, .bloom-page:hover) {
         display: block;
     }
 
-    .bloom-ui-overlay-crop-handle {
+    // Used to crop images, but for text boxes the left and right ones are actually used to change width (and thus
+    // aspect ratio).
+    .bloom-ui-overlay-side-handle {
         position: absolute;
-        width: @cropHandleRadius * 2;
-        height: @cropHandleRadius * 2;
-        border-radius: @cropHandleRadius;
+        width: @sideHandleRadius * 2;
+        height: @sideHandleRadius * 2;
+        border-radius: @sideHandleRadius;
         background-color: white;
         border: 1px solid @bloom-blue;
         box-sizing: border-box;
@@ -1389,37 +1418,37 @@ body :has(.bloom-page:focus-within, .bloom-page:hover) {
         }
     }
 
-    .bloom-ui-overlay-crop-handle-n {
-        top: -@cropHandleRadius;
-        left: calc(50% - @cropHandleRadius - @cropHandleCenter);
-        width: @cropHandleCenter * 2 + @cropHandleRadius * 2;
+    .bloom-ui-overlay-side-handle-n {
+        top: -@sideHandleRadius;
+        left: calc(50% - @sideHandleRadius - @sideHandleCenter);
+        width: @sideHandleCenter * 2 + @sideHandleRadius * 2;
         cursor: ns-resize;
     }
-    .bloom-ui-overlay-crop-handle-e {
-        top: calc(50% - @cropHandleRadius - @cropHandleCenter);
-        right: -@cropHandleRadius;
-        height: @cropHandleCenter * 2 + @cropHandleRadius * 2;
+    .bloom-ui-overlay-side-handle-e {
+        top: calc(50% - @sideHandleRadius - @sideHandleCenter);
+        right: -@sideHandleRadius;
+        height: @sideHandleCenter * 2 + @sideHandleRadius * 2;
         cursor: ew-resize;
     }
-    .bloom-ui-overlay-crop-handle-s {
-        bottom: -@cropHandleRadius;
-        left: calc(50% - @cropHandleRadius - @cropHandleCenter);
-        width: @cropHandleCenter * 2 + @cropHandleRadius * 2;
+    .bloom-ui-overlay-side-handle-s {
+        bottom: -@sideHandleRadius;
+        left: calc(50% - @sideHandleRadius - @sideHandleCenter);
+        width: @sideHandleCenter * 2 + @sideHandleRadius * 2;
         cursor: ns-resize;
     }
-    .bloom-ui-overlay-crop-handle-w {
-        top: calc(50% - @cropHandleRadius - @cropHandleCenter);
-        left: -@cropHandleRadius;
-        height: @cropHandleCenter * 2 + @cropHandleRadius * 2;
+    .bloom-ui-overlay-side-handle-w {
+        top: calc(50% - @sideHandleRadius - @sideHandleCenter);
+        left: -@sideHandleRadius;
+        height: @sideHandleCenter * 2 + @sideHandleRadius * 2;
         cursor: ew-resize;
     }
 }
 
 #overlay-context-controls {
     position: absolute;
-    // below, centered. Wider than it ever needs to be; the button div inside
-    // will be fit-content and centered.
-    bottom: -67px;
-    left: calc(50% - 150px);
-    width: 300px;
+    transform-origin: top left;
+    &.moving {
+        display: none;
+    }
+    pointer-events: none; // overridden for children, but the outer bit that's just for positioning should not be clickable
 }

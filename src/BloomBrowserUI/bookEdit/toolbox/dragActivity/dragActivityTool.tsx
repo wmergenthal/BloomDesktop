@@ -22,11 +22,6 @@ import {
     OverlayVideoItem,
     setGeneratedBubbleId
 } from "../overlay/overlayItem";
-import {
-    OverlayTool,
-    deleteBubble,
-    duplicateBubble
-} from "../overlay/overlayTool";
 import { ToolBox } from "../toolbox";
 import {
     classSetter,
@@ -50,6 +45,7 @@ import { BloomTooltip } from "../../../react_components/BloomToolTip";
 import { default as TrashIcon } from "@mui/icons-material/Delete";
 import { BubbleSpec } from "comicaljs";
 import { setPlayerUrlPrefixFromWindowLocationHref } from "./narration";
+import { theOneBubbleManager } from "../../js/bubbleManager";
 
 // This is the main code that manages the Bloom Games or Drag Activities.
 // See especially DragActivityControls, which is the main React component for the tool,
@@ -402,10 +398,7 @@ const startDraggingTarget = (e: MouseEvent) => {
     targetClickOffsetTop = e.clientY / scale - target.offsetTop;
     page.addEventListener("mouseup", stopDraggingTarget);
     page.addEventListener("mousemove", dragTarget);
-    const bubbleManager = OverlayTool.bubbleManager();
-    if (bubbleManager) {
-        bubbleManager?.setActiveElement(bubbleOfTarget(target));
-    }
+    theOneBubbleManager?.setActiveElement(bubbleOfTarget(target));
     dragTarget(e); // some side effects like drawing the arrow we want even if no movement happens.
 };
 
@@ -672,6 +665,63 @@ const getSoundOptions = (
     return soundOptions;
 };
 
+export let soundFolder: string;
+export const setSoundFolder = (folder: string) => {
+    soundFolder = folder;
+};
+
+export const copyAndPlaySoundAsync = async (
+    newSoundId: string,
+    page: HTMLElement,
+    copyBuiltIn: boolean
+) => {
+    if (copyBuiltIn) {
+        await copyBuiltInSoundAsync(newSoundId);
+    }
+    playSound(newSoundId, page);
+};
+
+const copyBuiltInSoundAsync = async (newSoundId: string) => {
+    const resultAudioDir = await postJson(
+        "fileIO/getSpecialLocation",
+        "CurrentBookAudioDirectory"
+    );
+
+    if (!resultAudioDir) {
+        return; // huh??
+    }
+
+    const targetPath = resultAudioDir.data + "/" + newSoundId;
+    await postData("fileIO/copyFile", {
+        from: encodeURIComponent(newSoundId),
+        to: encodeURIComponent(targetPath)
+    });
+};
+
+export const showDialogToChooseSoundFileAsync = async () => {
+    const title = await theOneLocalizationManager.asyncGetText(
+        "EditTab.Toolbox.DragActivity.ChooseSoundFile",
+        "Choose Sound File",
+        ""
+    );
+    const result = await postJson("fileIO/chooseFile", {
+        // Enhance: use something with a callback that can't timeout
+        title,
+        fileTypes: [
+            {
+                name: "MP3",
+                extensions: ["mp3"]
+            }
+        ],
+        defaultPath: soundFolder,
+        destFolder: "audio"
+    });
+    if (result?.data) {
+        setSoundFolder(result?.data);
+    }
+    return result?.data;
+};
+
 // The core of the Game tool. (a good many classes and function names reflect its original
 // name, Drag Activity Tool))
 const DragActivityControls: React.FunctionComponent<{
@@ -681,9 +731,6 @@ const DragActivityControls: React.FunctionComponent<{
     // The sound files for correct and wrong answers, determined by attributes of the page.
     const [correctSound, setCorrectSound] = useState("");
     const [wrongSound, setWrongSound] = useState("");
-
-    // The folder in which the user last chose a sound file (in this session).
-    const [soundFolder, setSoundFolder] = useState("");
 
     // The core type of activity of the current page, from the data-activity attribute.
     const [activityType, setActivityType] = useState("");
@@ -704,7 +751,7 @@ const DragActivityControls: React.FunctionComponent<{
         ""
     );
 
-    const bubbleManager = OverlayTool.bubbleManager();
+    const bubbleManager = theOneBubbleManager;
     const currentBubbleElement = bubbleManager?.getActiveElement();
     const currentBubbleTargetId = currentBubbleElement?.getAttribute(
         "data-bubble-id"
@@ -826,28 +873,16 @@ const DragActivityControls: React.FunctionComponent<{
         getStateFromPage();
     }, [props.pageGeneration]);
 
-    const showDialogToChooseSoundFileAsync = async (soundType: SoundType) => {
-        const result = await postJson("fileIO/chooseFile", {
-            // Todo: use something with a callback that can't timeout
-            title: "Choose Sound File", // Todo: localize
-            fileTypes: [
-                {
-                    name: "MP#",
-                    extensions: ["mp3"]
-                }
-            ],
-            defaultPath: soundFolder,
-            destFolder: "audio"
-        });
-        if (!result || !result.data) {
+    const updateSoundShowingDialog = async (soundType: SoundType) => {
+        const newSoundId = await showDialogToChooseSoundFileAsync();
+        if (!newSoundId) {
             return;
         }
 
         const page = getPage();
-        setSoundFolder(result.data);
         const copyBuiltIn = false; // already copied, and not in our sounds folder
-        setSound(soundType, result.data, copyBuiltIn);
-        playSound(result.data, page);
+        setSound(soundType, newSoundId, copyBuiltIn);
+        playSound(newSoundId, page);
     };
 
     // There's a lot of async stuff here, and a lot of arguments passed. Some of the argument-passing
@@ -861,9 +896,6 @@ const DragActivityControls: React.FunctionComponent<{
         getSoundFilesAsync("correct").then(setCorrectFiles);
         getSoundFilesAsync("wrong").then(setWrongFiles);
     }, []);
-    // If we decide to have some built-in ones, these can be obtained like correctFiles and wrongFiles,
-    // with a new prefix. (useMemo is to prevent [] being a new and hence changed object on each render)
-    const imageFiles: string[] = useMemo(() => [], []);
 
     const correctSoundOptions = useMemo(
         () =>
@@ -887,35 +919,6 @@ const DragActivityControls: React.FunctionComponent<{
             ),
         [wrongFiles, wrongSound, noneLabel, chooseLabel]
     );
-    const [imageSound, setImageSound] = useState("none");
-    useEffect(() => {
-        setImageSound(
-            currentBubbleElement?.getAttribute("data-sound") ?? "none"
-        );
-    }, [currentBubbleElement]);
-    const imageSoundOptions = useMemo(
-        () =>
-            getSoundOptions(
-                "image",
-                imageFiles,
-                imageSound,
-                noneLabel,
-                chooseLabel
-            ),
-        [imageFiles, imageSound, noneLabel, chooseLabel]
-    );
-
-    // Currently we only allow associating an extra audio with images (and gifs), which have
-    // no other audio (except possibly image descriptions?). If we get an actual user request
-    // it may be clearer how attaching one to a text or video would work, given that they
-    // can already have narration or an audio channel.
-    const canChooseAudioForElement = useMemo(
-        () =>
-            currentBubbleElement &&
-            currentBubbleElement.getElementsByClassName("bloom-imageContainer")
-                .length > 0,
-        [currentBubbleElement]
-    );
 
     // const [dragObjectType, setDragObjectType] = useState("text");
     // Todo: something has to call setDragObjectType when a draggable is selected.
@@ -929,13 +932,12 @@ const DragActivityControls: React.FunctionComponent<{
 
     const onSoundItemChosen = (soundType: SoundType, newSoundId: string) => {
         if (newSoundId === "choose") {
-            showDialogToChooseSoundFileAsync(soundType);
+            updateSoundShowingDialog(soundType);
             return;
         }
         if (
             (newSoundId === correctSound && soundType === "correct") ||
-            (newSoundId === wrongSound && soundType === "wrong") ||
-            (newSoundId === imageSound && soundType === "image")
+            (newSoundId === wrongSound && soundType === "wrong")
         ) {
             // Nothing is changing; also, we don't want to try to copy the sound file again, especially if it
             // is a user-chosen one that we won't find in our sounds folder.
@@ -967,51 +969,12 @@ const DragActivityControls: React.FunctionComponent<{
                     page.setAttribute("data-wrong-sound", newSoundId);
                 }
                 break;
-            case "image":
-                setImageSound(newSoundId);
-                if (!currentBubbleElement) {
-                    return;
-                }
-                if (newSoundId === "none") {
-                    currentBubbleElement.removeAttribute("data-sound");
-                } else {
-                    currentBubbleElement.setAttribute("data-sound", newSoundId);
-                }
-                break;
         }
         if (newSoundId !== "none") {
             // I think this can be fire-and-forget. But if you add something else that
             // needs the file to be there,you should await this, or add it to copyAndPlaySound.
             copyAndPlaySoundAsync(newSoundId, page, copyBuiltIn);
         }
-    };
-
-    const copyAndPlaySoundAsync = async (
-        newSoundId: string,
-        page: HTMLElement,
-        copyBuiltIn: boolean
-    ) => {
-        if (copyBuiltIn) {
-            await copyBuiltInSoundAsync(newSoundId);
-        }
-        playSound(newSoundId, page);
-    };
-
-    const copyBuiltInSoundAsync = async (newSoundId: string) => {
-        const resultAudioDir = await postJson(
-            "fileIO/getSpecialLocation",
-            "CurrentBookAudioDirectory"
-        );
-
-        if (!resultAudioDir) {
-            return; // huh??
-        }
-
-        const targetPath = resultAudioDir.data + "/" + newSoundId;
-        await postData("fileIO/copyFile", {
-            from: encodeURIComponent(newSoundId),
-            to: encodeURIComponent(targetPath)
-        });
     };
 
     let startTabInstructionsData = { instructionsKey: "", headingKey: "" };
@@ -1036,29 +999,13 @@ const DragActivityControls: React.FunctionComponent<{
             break;
     }
 
-    const toggleIsPartOfRightAnswer = () => {
-        if (!currentBubbleTargetId) {
-            return;
-        }
-        if (currentBubbleTarget) {
-            currentBubbleTarget.ownerDocument
-                .getElementById("target-arrow")
-                ?.remove();
-            currentBubbleTarget.remove();
-            setCurrentBubbleTarget(undefined);
-        } else {
-            setCurrentBubbleTarget(makeTargetForBubble(currentBubbleElement!));
-        }
-    };
-
     const toggleAllSameSize = () => {
         const newAllSameSize = !allItemsSameSize;
         setAllItemsSameSize(newAllSameSize);
         const page = getPage();
         page.setAttribute("data-same-size", newAllSameSize ? "true" : "false");
         if (newAllSameSize) {
-            const bm = OverlayTool.bubbleManager()!;
-            let someDraggable = bm.getActiveElement(); // prefer the selected one
+            let someDraggable = theOneBubbleManager?.getActiveElement(); // prefer the selected one
             if (
                 !someDraggable ||
                 !someDraggable.getAttribute("data-bubble-id")
@@ -1114,7 +1061,6 @@ const DragActivityControls: React.FunctionComponent<{
     const anyDraggables = activityType !== "drag-sort-sentence";
     // Does this activity type have a row of options buttons in Start mode?
     const anyOptions = anyDraggables; // but they might diverge as we do more?
-    const anyItemOptions = currentBubbleTargetId || canChooseAudioForElement;
     // which controls to show?
     const showLetterDraggable =
         activityType !== "drag-word-chooser-slider" &&
@@ -1443,7 +1389,7 @@ const DragActivityControls: React.FunctionComponent<{
                                 id="trashIcon"
                                 color="primary"
                                 fontSize="large"
-                                onClick={() => deleteBubble()}
+                                onClick={() => bubbleManager?.deleteBubble()}
                             />
                         </BloomTooltip>
                         <BloomTooltip
@@ -1466,91 +1412,6 @@ const DragActivityControls: React.FunctionComponent<{
                             />
                         </BloomTooltip>
                     </div>
-                    {props.activeTab === startTabIndex && anyItemOptions && (
-                        <div
-                            css={css`
-                                margin-left: 10px;
-                            `}
-                        >
-                            <Div
-                                css={css`
-                                    margin-top: 5px;
-                                `}
-                                l10nKey="EditTab.Toolbox.DragActivity.Options"
-                            ></Div>
-
-                            {// The tooltip is set up for display as disabled, but our latest theory
-                            // is that it's better not to show this control at all when it does not apply.
-                            currentBubbleTargetId && (
-                                <div
-                                    css={css`
-                                        display: flex;
-                                        margin-top: 5px;
-                                    `}
-                                >
-                                    <BloomTooltip
-                                        // reinstate if we decide not to hid altogether if there's no targetId.
-                                        // enable if there's an active bubble that has a data-bubble-id indicating it is draggable in Play mode
-                                        // Don't disable pointer events because we need them to get the disabled tooltip.
-                                        // css={css`
-                                        //     ${currentBubbleTargetId
-                                        //         ? ""
-                                        //         : "opacity:0.4; "}
-                                        // `}
-                                        showDisabled={!currentBubbleTargetId}
-                                        id="partOfRightAnswer"
-                                        placement="top-end"
-                                        tip={
-                                            <Div l10nKey="EditTab.Toolbox.DragActivity.PartOfRightAnswer"></Div>
-                                        }
-                                        // If we decide not to hide it we might want to restore this and the corresponding
-                                        // element in BloomMediumPriority.xlf
-                                        // tipWhenDisabled={{
-                                        //     l10nKey:
-                                        //         "EditTab.Toolbox.DragActivity.PartOfRightAnswerDisabled",
-                                        //     english:
-                                        //         "Nothing that can be part of the right answer is selected"
-                                        // }}
-                                    >
-                                        <div
-                                            // it's part of the right answer iff it has a target
-                                            css={css`
-                                                ${optionCss(
-                                                    currentBubbleTarget
-                                                )}
-                                            `}
-                                            onClick={toggleIsPartOfRightAnswer}
-                                        >
-                                            <img src="images/Is part of right answer.svg"></img>
-                                        </div>
-                                    </BloomTooltip>
-                                </div>
-                            )}
-                            {canChooseAudioForElement && (
-                                <div
-                                    css={css`
-                                        margin: 5px 10px 0 0;
-                                        display: flex;
-                                        ${disabledCss(
-                                            canChooseAudioForElement
-                                        )};
-                                        gap: 5px;
-                                    `}
-                                >
-                                    <img
-                                        width="24px"
-                                        src="/bloom/bookEdit/toolbox/music/speaker-volume.svg"
-                                    />
-                                    {soundSelect(
-                                        "image",
-                                        imageSoundOptions,
-                                        imageSound,
-                                        onSoundItemChosen
-                                    )}
-                                </div>
-                            )}
-                        </div>
-                    )}
                 </div>
             )}
         </ThemeProvider>
@@ -1640,8 +1501,8 @@ const CorrectWrongControls: React.FunctionComponent<{
 };
 
 export const makeDuplicateOfDragBubble = () => {
-    const old = OverlayTool.bubbleManager()?.getActiveElement();
-    const duplicate = duplicateBubble();
+    const old = theOneBubbleManager?.getActiveElement();
+    const duplicate = theOneBubbleManager?.duplicateBubble();
     if (!duplicate || !old) {
         // can't be duplicate without an old, but make TS happy
         return;
@@ -1680,11 +1541,12 @@ export const makeDuplicateOfDragBubble = () => {
 };
 
 // Three kinds of sound we can set with a dropdown.
-type SoundType = "correct" | "wrong" | "image";
+// Temporarily we also allowed "image", so it was not a boolean
+export type SoundType = "correct" | "wrong";
 
 // Make a <Select> for choosing a sound file. The arguments allow reusing this for various sounds;
 // the "which" argument is only used to pass to the setValue function.
-const soundSelect = (
+export const soundSelect = (
     soundType: SoundType,
     options: { label: string; id: string; divider: boolean }[],
     value: string,
@@ -1848,10 +1710,9 @@ export class DragActivityTool extends ToolboxToolReactAdaptor {
     private lastPageId = "";
 
     public newPageReady() {
-        const bubbleManager = OverlayTool.bubbleManager();
         const page = DragActivityTool.getBloomPage();
         const pageFrameExports = getEditablePageBundleExports();
-        if (!bubbleManager || !page || !pageFrameExports) {
+        if (!theOneBubbleManager || !page || !pageFrameExports) {
             // probably the toolbox just finished loading before the page.
             // No clean way to fix this
             window.setTimeout(() => this.newPageReady(), 100);
@@ -1871,8 +1732,8 @@ export class DragActivityTool extends ToolboxToolReactAdaptor {
         } else {
             this.lastPageId = pageId;
             // useful during development, MAY not need in production.
-            bubbleManager.removeDetachedTargets();
-            bubbleManager.adjustBubbleOrdering();
+            theOneBubbleManager.removeDetachedTargets();
+            theOneBubbleManager.adjustBubbleOrdering();
 
             // Force things to Start tab as we change page.
             // If we decide not to do this, we should probably at least find a way to do it
@@ -1957,7 +1818,7 @@ export class DragActivityTool extends ToolboxToolReactAdaptor {
         }
     }
 }
-function playSound(newSoundId: string, page: HTMLElement) {
+export function playSound(newSoundId: string, page: HTMLElement) {
     const audio = new Audio("audio/" + newSoundId);
     audio.style.visibility = "hidden";
     audio.classList.add("bloom-ui"); // so it won't be saved, even if we fail to remove it otherwise
@@ -1997,7 +1858,7 @@ function playSound(newSoundId: string, page: HTMLElement) {
 //         b => b.getElementsByTagName("img")[0].getAttribute("src") === src
 //     );
 //     if (bubbleToSelect) {
-//         OverlayTool.bubbleManager()?.setActiveElement(
+//         theOneBubbleManager?.setActiveElement(
 //             bubbleToSelect as HTMLElement
 //         );
 //     }
@@ -2061,13 +1922,12 @@ export function setActiveDragActivityTab(tab: number) {
     const toolbox = getToolboxBundleExports()?.getTheOneToolbox();
     toolbox?.getTheOneDragActivityTool()?.setActiveTab(tab);
 
-    const bubbleManager = OverlayTool.bubbleManager();
     //Slider: const wrapper = page.getElementsByClassName(
     //     "bloom-activity-slider"
     // )[0] as HTMLElement;
 
     if (tab === playTabIndex) {
-        bubbleManager?.suspendComicEditing("forGamePlayMode");
+        theOneBubbleManager?.suspendComicEditing("forGamePlayMode");
         // Enhance: perhaps the next/prev page buttons could do something even here?
         // If so, would we want them to work only in TryIt mode, or always?
         prepareActivity(page, _next => {});
@@ -2075,14 +1935,13 @@ export function setActiveDragActivityTab(tab: number) {
         //Slider: wrapper?.removeEventListener("click", designTimeClickOnSlider);
     } else {
         undoPrepareActivity(page);
-        const bubbleManager = OverlayTool.bubbleManager();
-        bubbleManager?.resumeComicEditing();
+        theOneBubbleManager?.resumeComicEditing();
         //Slider: wrapper?.addEventListener("click", designTimeClickOnSlider);
     }
     if (tab === correctTabIndex || tab === wrongTabIndex) {
         // We can't currently do this for hidden bubbles, and selecting one of these tabs
         // may cause some previously hidden bubbles to become visible.
-        bubbleManager?.ensureBubblesIntersectParent(page);
+        theOneBubbleManager?.ensureBubblesIntersectParent(page);
     }
     if (tab === startTabIndex) {
         enableDraggingTargets(page);

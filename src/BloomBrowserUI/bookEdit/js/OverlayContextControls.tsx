@@ -1,35 +1,49 @@
 import { jsx, css } from "@emotion/react";
 
 import * as React from "react";
-import { useState, useEffect, useMemo, Fragment, useRef } from "react";
+import { useState, useEffect, Fragment, useRef } from "react";
 import * as ReactDOM from "react-dom";
 import { kBloomBlue, lightTheme } from "../../bloomMaterialUITheme";
 import { default as CopyrightIcon } from "@mui/icons-material/Copyright";
 import { default as SearchIcon } from "@mui/icons-material/Search";
 import { default as MenuIcon } from "@mui/icons-material/MoreHorizSharp";
 import { default as CopyIcon } from "@mui/icons-material/ContentCopy";
-import { default as CutIcon } from "@mui/icons-material/ContentCut";
+import { default as CheckIcon } from "@mui/icons-material/Check";
+import { default as VolumeUpIcon } from "@mui/icons-material/VolumeUp";
 import { default as PasteIcon } from "@mui/icons-material/ContentPaste";
+import { default as Circle } from "@mui/icons-material/Circle";
 import { showCopyrightAndLicenseDialog } from "../editViewFrame";
 import { doImageCommand, getImageUrlFromImageContainer } from "./bloomImages";
-import { makeDuplicateOfDragBubble } from "../toolbox/dragActivity/dragActivityTool";
-import { deleteBubble, duplicateBubble } from "../toolbox/overlay/overlayTool";
+import { doVideoCommand } from "./bloomVideo";
+import {
+    copyAndPlaySoundAsync,
+    makeDuplicateOfDragBubble,
+    makeTargetForBubble,
+    playSound,
+    showDialogToChooseSoundFileAsync
+} from "../toolbox/dragActivity/dragActivityTool";
 import { ThemeProvider } from "@mui/material/styles";
 import {
     ILocalizableMenuItemProps,
-    LocalizableMenuItem
+    LocalizableMenuItem,
+    LocalizableNestedMenuItem
 } from "../../react_components/localizableMenuItem";
 import Menu from "@mui/material/Menu";
 import { Divider } from "@mui/material";
 import { DuplicateIcon } from "./DuplicateIcon";
-import { BubbleManager } from "./bubbleManager";
+import { BubbleManager, theOneBubbleManager } from "./bubbleManager";
 import { copySelection, GetEditor, pasteClipboard } from "./bloomEditing";
 import { BloomTooltip } from "../../react_components/BloomToolTip";
 import { TrashIcon } from "../toolbox/overlay/TrashIcon";
+import { useL10n } from "../../react_components/l10nHooks";
 
 const controlFrameColor: string = kBloomBlue;
 
-// The is the controls bar that appears beneath an overlay when it is selected. It contains buttons
+interface IMenuItemWithSubmenu extends ILocalizableMenuItemProps {
+    subMenu?: ILocalizableMenuItemProps[];
+}
+
+// This is the controls bar that appears beneath an overlay when it is selected. It contains buttons
 // for the most common operations that apply to the overlay in its current state, and a menu for less common
 // operations.
 
@@ -51,26 +65,34 @@ const OverlayContextControls: React.FunctionComponent<{
     const hasImage = !!imgContainer;
     const img = imgContainer?.getElementsByTagName("img")[0];
     //const hasLicenseProblem = hasImage && !img.getAttribute("data-copyright");
+    const videoContainer = props.overlay.getElementsByClassName(
+        "bloom-videoContainer"
+    )[0];
+    const hasVideo = !!videoContainer;
+    const video = videoContainer?.getElementsByTagName("video")[0];
+    const videoSource = video?.getElementsByTagName("source")[0];
+    const videoAlreadyChosen = !!videoSource?.getAttribute("src");
     const isPlaceHolder =
         hasImage && img.getAttribute("src")?.startsWith("placeHolder.png");
     // Some of the icons we use for buttons are Material UI ones. They need this CSS to look right.
-    const materialIconCss = css`
-        width: 30px;
+    const materialIconCss = (svgsize?: number) => css`
+        height: 30px;
         border-color: transparent;
         background-color: transparent;
         // These tweaks help make a neat row of aligned buttons the same size.
         top: -4px; // wants 3px if we remove align-items:start
         position: relative;
         svg {
-            font-size: 1.7rem;
+            font-size: ${svgsize ?? 1.7}rem;
         }
     `;
     // Some of the icons we use for buttons are SVGs. They need this CSS to look right and similar to
     // the Material UI ones.
     const svgIconCss = css`
-        width: 22px;
+        height: 23px;
         position: relative;
         //top: 7px; // restore if we remove align-items:start
+        top: -1px;
         border-color: transparent;
         background-color: transparent;
     `;
@@ -86,19 +108,96 @@ const OverlayContextControls: React.FunctionComponent<{
         );
     };
 
+    const setMenuOpen = (open: boolean) => {
+        // Even though we've done our best to tell the MUI menu NOT to steal focus, it seems it still does...
+        // or some other code somewhere is doing it when we choose a menu item. So we tell the bubble manager
+        // to ignore focus changes while the menu is open.
+        BubbleManager.ignoreFocusChanges = open;
+        props.setMenuOpen(open);
+    };
+
     const menuEl = useRef<HTMLElement | null>();
 
-    const menuIconColor = "black"; // Not sure just changing this will actually change them all.
+    // Menu item names for 'none' and "Choose...", options.
+    const noneLabel = useL10n("None", "EditTab.Toolbox.DragActivity.None", "");
+    const chooseLabel = useL10n(
+        "Choose...",
+        "EditTab.Toolbox.DragActivity.ChooseSound",
+        ""
+    );
+
+    const menuIconColor = "black";
     const muiMenIconCss = css`
         color: ${menuIconColor};
     `;
+    const currentBubbleTargetId = props.overlay?.getAttribute("data-bubble-id");
+    const [currentBubbleTarget, setCurrentBubbleTarget] = useState<
+        HTMLElement | undefined
+    >();
+    useEffect(() => {
+        if (!currentBubbleTargetId) {
+            setCurrentBubbleTarget(undefined);
+            return;
+        }
+        const page = props.overlay.closest(".bloom-page") as HTMLElement;
+        setCurrentBubbleTarget(
+            page?.querySelector(
+                `[data-target-of="${currentBubbleTargetId}"]`
+            ) as HTMLElement
+        );
+        // We need to re-evaluate when changing pages, it's possible the initially selected item
+        // on a new page has the same currentBubbleTargetId.
+    }, [currentBubbleTargetId]);
+
+    const toggleIsPartOfRightAnswer = () => {
+        if (!currentBubbleTargetId) {
+            return;
+        }
+        if (currentBubbleTarget) {
+            currentBubbleTarget.ownerDocument
+                .getElementById("target-arrow")
+                ?.remove();
+            currentBubbleTarget.remove();
+            setCurrentBubbleTarget(undefined);
+        } else {
+            setCurrentBubbleTarget(makeTargetForBubble(props.overlay));
+        }
+    };
+
+    // Currently we only allow associating an extra audio with images (and gifs), which have
+    // no other audio (except possibly image descriptions?). If we get an actual user request
+    // it may be clearer how attaching one to a text or video would work, given that they
+    // can already have narration or an audio channel.
+    const canChooseAudioForElement = hasImage;
+
+    const [imageSound, setImageSound] = useState("none");
+    useEffect(() => {
+        setImageSound(props.overlay.getAttribute("data-sound") ?? "none");
+    }, [props.overlay]);
+
+    // This is uncomfortably similar to the method by the same name in dragActivityTool.
+    // And indeed that method has a case for handling an image sound, which is no longer
+    // handled on the toolbox side. But both methods make use of component state in
+    // ways that make sharing code difficult.
+    const updateSoundShowingDialog = async () => {
+        const newSoundId = await showDialogToChooseSoundFileAsync();
+        if (!newSoundId) {
+            return;
+        }
+
+        const page = props.overlay.closest(".bloom-page") as HTMLElement;
+        const copyBuiltIn = false; // already copied, and not in our sounds folder
+        props.overlay.setAttribute("data-sound", newSoundId);
+        setImageSound(newSoundId);
+        copyAndPlaySoundAsync(newSoundId, page, copyBuiltIn);
+    };
 
     // These commands apply to all overlays.
-    const menuOptions: ILocalizableMenuItemProps[] = [
+    const menuOptions: IMenuItemWithSubmenu[] = [
         {
             l10nId: "EditTab.Toolbox.ComicTool.Options.Duplicate",
             english: "Duplicate",
-            onClick: duplicateBubble,
+            onClick: theOneBubbleManager?.duplicateBubble,
             icon: (
                 <DuplicateIcon
                     css={css`
@@ -111,7 +210,7 @@ const OverlayContextControls: React.FunctionComponent<{
         {
             l10nId: "Common.Delete",
             english: "Delete",
-            onClick: deleteBubble,
+            onClick: theOneBubbleManager?.deleteBubble,
             icon: (
                 <TrashIcon
                     color="black"
@@ -124,6 +223,81 @@ const OverlayContextControls: React.FunctionComponent<{
             )
         }
     ];
+    if (!hasImage && !hasVideo) {
+        menuOptions.splice(0, 0, {
+            l10nId: "EditTab.Toolbox.ComicTool.Options.AddChildBubble",
+            english: "Add Child Bubble",
+            onClick: theOneBubbleManager?.addChildBubble
+        });
+    }
+    if (currentBubbleTargetId || canChooseAudioForElement) {
+        menuOptions.push({
+            l10nId: "-",
+            english: "",
+            onClick: () => {}
+        });
+    }
+    if (currentBubbleTargetId) {
+        menuOptions.push({
+            l10nId: "EditTab.Toolbox.DragActivity.PartOfRightAnswer",
+            english: "Part of the right answer",
+            subLabelL10nId:
+                "EditTab.Toolbox.DragActivity.PartOfRightAnswerMore",
+            onClick: toggleIsPartOfRightAnswer,
+            icon: currentBubbleTarget ? (
+                <CheckIcon css={muiMenIconCss} />
+            ) : (
+                undefined
+            )
+        });
+    }
+    if (canChooseAudioForElement) {
+        const imageSoundLabel = imageSound.replace(/.mp3$/, "");
+        const mainLabel = imageSound === "none" ? noneLabel : imageSoundLabel;
+        const subMenu: ILocalizableMenuItemProps[] = [
+            {
+                l10nId: "EditTab.Toolbox.DragActivity.None",
+                english: "None",
+                onClick: () => {
+                    props.overlay.removeAttribute("data-sound");
+                    setImageSound("none");
+                    setMenuOpen(false);
+                }
+            },
+            {
+                l10nId: "EditTab.Toolbox.DragActivity.ChooseSound",
+                english: "Choose...",
+                onClick: () => {
+                    setMenuOpen(false);
+                    updateSoundShowingDialog();
+                }
+            }
+        ];
+        menuOptions.push({
+            l10nId: null,
+            english: mainLabel,
+            subLabelL10nId: "EditTab.Image.PlayWhenTouched",
+            onClick: () => {},
+            icon: <VolumeUpIcon css={muiMenIconCss} />,
+            subMenu
+        });
+        if (imageSound !== "none") {
+            subMenu.splice(1, 0, {
+                l10nId: null,
+                english: imageSoundLabel,
+                onClick: () => {
+                    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                    playSound(
+                        imageSound,
+                        props.overlay.closest(".bloom-page")!
+                    );
+                    setMenuOpen(false);
+                },
+                icon: <CheckIcon css={muiMenIconCss} />
+            });
+        }
+    }
+
     // Add these for images
     if (hasImage) {
         menuOptions.unshift(
@@ -175,6 +349,50 @@ const OverlayContextControls: React.FunctionComponent<{
 
         // );
     }
+
+    // Add these for videos
+    if (hasVideo) {
+        menuOptions.unshift(
+            {
+                l10nId: "EditTab.Toolbox.ComicTool.Options.ChooseVideo",
+                english: "Choose Video from your Computer...",
+                onClick: () => doVideoCommand(videoContainer, "choose"),
+                icon: <SearchIcon css={muiMenIconCss} />
+            },
+            {
+                l10nId: "EditTab.Toolbox.ComicTool.Options.RecordYourself",
+                english: "Record yourself...",
+                onClick: () => doVideoCommand(videoContainer, "record"),
+                icon: <Circle css={muiMenIconCss} viewBox="0 0 28 28" />
+            },
+            {
+                l10nId: "-",
+                english: "",
+                onClick: () => {
+                    /*do nothing*/
+                }
+            }
+        );
+    }
+    const autoHeight = !props.overlay.classList.contains("bloom-noAutoHeight");
+    const handleMenuButtonMouseDown = (e: React.MouseEvent) => {
+        // This prevents focus leaving the text box.
+        e.preventDefault();
+        e.stopPropagation();
+    };
+    const handleMenuButtonMouseUp = (e: React.MouseEvent) => {
+        // This prevents focus leaving the text box.
+        e.preventDefault();
+        e.stopPropagation();
+        setMenuOpen(true); // Review: better on mouse down? But then the mouse up may be missed, if the menu is on top...
+    };
+    const toggleAutoHeight = () => {
+        props.overlay.classList.toggle("bloom-noAutoHeight");
+        theOneBubbleManager.updateAutoHeight();
+        // In most contexts, we would need to do something now to make the control render, so we get
+        // an updated value for autoHeight. But the menu is going to be hidden, and showing it again
+        // will involve a re-render, and we don't care until then.
+    };
     const editable = props.overlay.getElementsByClassName(
         "bloom-editable bloom-visibility-code-on"
     )[0] as HTMLElement;
@@ -212,6 +430,18 @@ const OverlayContextControls: React.FunctionComponent<{
                 l10nId: "-",
                 english: "",
                 onClick: () => {}
+            },
+            {
+                l10nId: "EditTab.Toolbox.ComicTool.Options.AutoHeight",
+                english: "Auto Height",
+                // We don't actually know there's no image on the clipboard, but it's not relevant for a text box.
+                onClick: () => toggleAutoHeight(),
+                icon: autoHeight && <CheckIcon css={muiMenIconCss} />
+            },
+            {
+                l10nId: "-",
+                english: "",
+                onClick: () => {}
             }
         );
     }
@@ -243,7 +473,7 @@ const OverlayContextControls: React.FunctionComponent<{
                     button {
                         line-height: 0.7em;
                     }
-                    // needed because it's a child of the control frame which has pointer-events:none
+                    // needed because it's a child of #overlay-context-controls which has pointer-events:none
                     pointer-events: all;
                 `}
             >
@@ -287,7 +517,7 @@ const OverlayContextControls: React.FunctionComponent<{
                                 }}
                             >
                                 <button
-                                    css={materialIconCss}
+                                    css={materialIconCss()}
                                     onClick={e => {
                                         if (!props.overlay) return;
                                         const imgContainer = props.overlay.getElementsByClassName(
@@ -315,7 +545,7 @@ const OverlayContextControls: React.FunctionComponent<{
                                 }}
                             >
                                 <button
-                                    css={materialIconCss}
+                                    css={materialIconCss(1.3)}
                                     style={{ marginRight: "20px" }}
                                     onClick={e => {
                                         if (!props.overlay) return;
@@ -355,7 +585,7 @@ const OverlayContextControls: React.FunctionComponent<{
                         >
                             <button
                                 css={svgIconCss}
-                                style={{ top: 0, width: "26px" }}
+                                style={{ width: "26px" }}
                                 onClick={() => {
                                     if (!props.overlay) return;
                                     GetEditor().runFormatDialog(editable);
@@ -371,6 +601,8 @@ const OverlayContextControls: React.FunctionComponent<{
                                         filter: invert(38%) sepia(93%)
                                             saturate(422%) hue-rotate(140deg)
                                             brightness(93%) contrast(96%);
+                                        height: 21px !important;
+                                        top: -1px;
                                     `}
                                     src="/bloom/bookEdit/img/cog.svg"
                                 />
@@ -387,44 +619,104 @@ const OverlayContextControls: React.FunctionComponent<{
                         </div>
                     </div>
                 )}
-                <BloomTooltip
-                    id="format"
-                    placement="top"
-                    tip={{
-                        l10nKey: "EditTab.Toolbox.ComicTool.Options.Duplicate"
-                    }}
-                >
-                    <button
-                        css={svgIconCss}
-                        onClick={() => {
-                            if (!props.overlay) return;
-                            makeDuplicateOfDragBubble();
+                {!hasVideo && (
+                    <BloomTooltip
+                        id="format"
+                        placement="top"
+                        tip={{
+                            l10nKey:
+                                "EditTab.Toolbox.ComicTool.Options.Duplicate"
                         }}
                     >
-                        <img src="/bloom/bookEdit/img/Duplicate.svg" />
-                    </button>
-                </BloomTooltip>
+                        <button
+                            css={svgIconCss}
+                            onClick={() => {
+                                if (!props.overlay) return;
+                                makeDuplicateOfDragBubble();
+                            }}
+                        >
+                            <img src="/bloom/bookEdit/img/Duplicate.svg" />
+                        </button>
+                    </BloomTooltip>
+                )}
+                {hasVideo && !videoAlreadyChosen && (
+                    <Fragment>
+                        <BloomTooltip
+                            id="chooseVideo"
+                            placement="top"
+                            tip={{
+                                l10nKey:
+                                    "EditTab.Toolbox.ComicTool.Options.ChooseVideo"
+                            }}
+                        >
+                            <button
+                                css={svgIconCss}
+                                onClick={() =>
+                                    doVideoCommand(videoContainer, "choose")
+                                }
+                            >
+                                <SearchIcon
+                                    color="primary"
+                                    viewBox="0 0 23 23" // a bit bigger
+                                />
+                            </button>
+                        </BloomTooltip>
+                        <BloomTooltip
+                            id="recordVideo"
+                            placement="top"
+                            tip={{
+                                l10nKey:
+                                    "EditTab.Toolbox.ComicTool.Options.RecordYourself"
+                            }}
+                        >
+                            <button
+                                css={svgIconCss}
+                                onClick={() =>
+                                    doVideoCommand(videoContainer, "record")
+                                }
+                            >
+                                <Circle
+                                    color="primary"
+                                    viewBox="0 0 29 29" // somewhat smaller
+                                    css={css`
+                                        top: 2px;
+                                    `}
+                                />
+                            </button>
+                        </BloomTooltip>
+                    </Fragment>
+                )}
                 <BloomTooltip
-                    id="format"
+                    id="trash"
                     placement="top"
                     tip={{
                         l10nKey: "Common.Delete"
                     }}
                 >
                     <button
-                        css={materialIconCss}
+                        css={svgIconCss}
                         onClick={() => {
                             if (!props.overlay) return;
-                            deleteBubble();
+                            theOneBubbleManager?.deleteBubble();
                         }}
                     >
-                        <TrashIcon color={kBloomBlue} />
+                        <TrashIcon
+                            css={css`
+                                height: 23px;
+                                top: -2px;
+                            `}
+                            color={kBloomBlue}
+                        />
                     </button>
                 </BloomTooltip>
                 <button
                     ref={ref => (menuEl.current = ref)}
-                    css={materialIconCss}
-                    onClick={() => props.setMenuOpen(true)}
+                    css={materialIconCss()}
+                    // It would be more natural to handle a click. But clicks are a combination of
+                    // mouse down and mouse up, and those have side effects, especially change of focus,
+                    // that we need to prevent. So we handle them ourselves.
+                    onMouseDown={handleMenuButtonMouseDown}
+                    onMouseUp={handleMenuButtonMouseUp}
                 >
                     <MenuIcon color="primary" />
                 </button>
@@ -451,7 +743,9 @@ const OverlayContextControls: React.FunctionComponent<{
                         props.menuAnchorPosition ? "anchorPosition" : "anchorEl"
                     }
                     anchorPosition={props.menuAnchorPosition}
-                    onClose={() => props.setMenuOpen(false)}
+                    onClose={() => setMenuOpen(false)}
+                    disableAutoFocus={true}
+                    disableEnforceFocus={true}
                 >
                     {menuOptions.map((option, index) => {
                         if (option.l10nId === "-") {
@@ -463,13 +757,36 @@ const OverlayContextControls: React.FunctionComponent<{
                                 />
                             );
                         }
+                        if (option.subMenu) {
+                            return (
+                                <LocalizableNestedMenuItem
+                                    english={option.english}
+                                    l10nId={option.l10nId}
+                                    icon={option.icon}
+                                    truncateMainLabel={true}
+                                    subLabelL10nId={option.subLabelL10nId}
+                                >
+                                    {option.subMenu.map(
+                                        (subOption, subIndex) => (
+                                            <LocalizableMenuItem
+                                                key={subIndex}
+                                                l10nId={subOption.l10nId}
+                                                english={subOption.english}
+                                                onClick={subOption.onClick}
+                                                icon={subOption.icon}
+                                            />
+                                        )
+                                    )}
+                                </LocalizableNestedMenuItem>
+                            );
+                        }
                         return (
                             <LocalizableMenuItem
                                 key={index}
                                 l10nId={option.l10nId}
                                 english={option.english}
                                 onClick={e => {
-                                    props.setMenuOpen(false);
+                                    setMenuOpen(false);
                                     option.onClick(e);
                                 }}
                                 icon={option.icon}
