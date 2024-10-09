@@ -55,6 +55,25 @@ const restorePositions = () => {
     positionsToRestore = [];
 };
 
+export function adjustDraggablesForLanguage(page: HTMLElement) {
+    if (page.getAttribute("data-activity") !== "drag-letter-to-target") {
+        return;
+    }
+    const draggables = Array.from(page.querySelectorAll("[data-bubble-id"));
+    draggables.shift(); // The first one is always visible.
+    draggables.forEach((draggable: HTMLElement) => {
+        const shouldBeVisible = !!(draggable.getElementsByClassName(
+            "bloom-visibility-code-on"
+        )[0] as HTMLElement)?.innerText.trim();
+        draggable.classList.toggle("bloom-unused-in-lang", !shouldBeVisible);
+        const target = getTarget(draggable);
+
+        if (target) {
+            target.classList.toggle("bloom-unused-in-lang", !shouldBeVisible);
+        }
+    });
+}
+
 // Function to call to get everything ready for playing the game.
 // Things that get done here should usually be undone in undoPrepareActivity.
 export function prepareActivity(
@@ -64,6 +83,7 @@ export function prepareActivity(
     changePageAction: (next: boolean) => void
 ) {
     currentPage = page;
+    adjustDraggablesForLanguage(page);
     currentChangePageAction = changePageAction;
     doShowAnswersInTargets(
         page.getAttribute("data-show-answers-in-targets") === "true",
@@ -437,7 +457,7 @@ function getVisibleEditables(container: HTMLElement) {
     return result;
 }
 
-function shuffle<T>(array: T[]): T[] {
+export function shuffle<T>(array: T[]): T[] {
     // review: something Copliot came up with. Is it guaranteed to be sufficiently different
     // from the correct answer?
     let currentIndex = array.length,
@@ -595,6 +615,13 @@ const getVisibleText = (elt: HTMLElement): string => {
 };
 
 const rightPosition = (draggableToCheck: HTMLElement, target: HTMLElement) => {
+    // Note: in some cases, some of the draggables and their targets are hidden (e.g.,
+    // the word spelling game keeps letter draggables that are not needed for the
+    // current word in case they are needed in another language.)
+    // These automatically register as correct, because offsetLeft and offsetTop return zero
+    // for display:none elements, so the position we get for the draggable and the target are
+    // both (0,0). This is what we want, since the user can't be faulted for not dragging
+    // invisible elements to the right place.
     const actualX = draggableToCheck.offsetLeft;
     const actualY = draggableToCheck.offsetTop;
     const correctX =
@@ -674,6 +701,7 @@ function showCorrectOrWrongItems(page: HTMLElement, correct: boolean) {
 
 function playSound(someElt: HTMLElement, soundFile: string) {
     const audio = new Audio(urlPrefix() + "/audio/" + soundFile);
+    audio.classList.add("bloom-ui"); // in case remove code fails, should make sure it doesn't get saved.
     audio.style.visibility = "hidden";
     // To my surprise, in BP storybook it works without adding the audio to any document.
     // But in Bloom proper, it does not. I think it is because this code is part of the toolbox,

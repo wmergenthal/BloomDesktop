@@ -423,6 +423,9 @@
 .bloom-textOverPicture.draggable-text {
     background-color: var(--draggable-background-color);
     color: var(--draggable-color);
+    &.bloom-unused-in-lang {
+        display: none;
+    }
 }
 .drag-item-correct,
 .drag-item-wrong {
@@ -448,6 +451,9 @@
     &:focus {
         box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1),
             0 0 8px var(--draggable-background-color);
+    }
+    &.bloom-unused-in-lang {
+        display: none;
     }
 }
 
@@ -494,4 +500,29 @@
             border-color: var(--active-button-border);
         }
     }
+}
+
+.bloom-game-prompt {
+    display: none;
+}
+
+// The format dialog is not relevant in a prompt dialog (and somehow comes up with the
+// wrong initial style), so just hide it.
+#promptInput #formatButton {
+    display: none;
+}
+
+// Tricky. We only want to see the prompt button in start mode, when it makes sense to be editing the
+// draggable content. I'd rather have the visibility (like everything else about the control) be handled
+// by the React code that manages the button. But that doesn't have any easy way to know whether we're
+// in Start mode. Even if we gave the root element another prop, it would be hard to set it correctly,
+// because we actually do the outer ReactDOM.render as we switch tabs and before the class we're looking
+// for gets set. So it seems easiest to let React give it an ID and use these rules to hide it.
+// I'm using visibility rather than display so that React can have control of the display mode (currently flex).
+#promptButton {
+    visibility: hidden;
+}
+
+.drag-activity-start #promptButton {
+    visibility: unset;
 }

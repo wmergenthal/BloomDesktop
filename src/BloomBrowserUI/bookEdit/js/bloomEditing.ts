@@ -841,48 +841,51 @@ export function SetupElements(
             );
         }
         BloomSourceBubbles.setupSizeChangedHandling(divsThatHaveSourceBubbles);
-
-        // If we saved the page with an indication that a particular element should be
-        // active, and calling code is not specifying one, restore the one we saved.
-        // This is especially useful when the page is unexpectedly reloaded, for example,
-        // changing a picture.
-        // Later: we decided we only want to do this if we're on the same page as last time.
-        if (!elementToFocus) {
-            const currentPageId = document
-                .getElementsByClassName("bloom-page")[0]
-                ?.getAttribute("id");
-            if (currentPageId === (window.top as any).lastPageId) {
-                elementToFocus = Array.from(
-                    document.getElementsByClassName(kTextOverPictureClass)
-                ).find(e => e.hasAttribute("data-bloom-active")) as HTMLElement;
-            } else {
-                // remember this page!
-                (window.top as any).lastPageId = currentPageId;
+        if (theOneBubbleManager.isComicEditingOn) {
+            // If we saved the page with an indication that a particular element should be
+            // active, and calling code is not specifying one, restore the one we saved.
+            // This is especially useful when the page is unexpectedly reloaded, for example,
+            // changing a picture.
+            // Later: we decided we only want to do this if we're on the same page as last time.
+            if (!elementToFocus) {
+                const currentPageId = document
+                    .getElementsByClassName("bloom-page")[0]
+                    ?.getAttribute("id");
+                if (currentPageId === (window.top as any).lastPageId) {
+                    elementToFocus = Array.from(
+                        document.getElementsByClassName(kTextOverPictureClass)
+                    ).find(e =>
+                        e.hasAttribute("data-bloom-active")
+                    ) as HTMLElement;
+                } else {
+                    // remember this page!
+                    (window.top as any).lastPageId = currentPageId;
+                }
             }
-        }
-        if (!elementToFocus) {
-            // Make sure the active element is cleared if we're not setting it.
-            theOneBubbleManager.setActiveElement(undefined);
-        }
+            if (!elementToFocus) {
+                // Make sure the active element is cleared if we're not setting it.
+                theOneBubbleManager.setActiveElement(undefined);
+            }
 
-        const focusable = elementToFocus
-            ? $(elementToFocus).find(":focusable")
-            : undefined;
-        // If we were passed an element to focus, it could be a new comic bubble, and we'd like to
-        // be all set to type in it. So we focus it.
-        // I'm not sure whether this is desirable when we found one from data-bloom-active,
-        // but there may be a case where the page gets reloaded while a text-editable bubble is active.
-        if (elementToFocus && focusable) {
-            focusable.focus();
-            // Ideally calling focus above has this as a side effect.
-            // However, the focusin event handler doesn't seem to get called at this point
-            // for image containers, even though we have set tabindex to zero,
-            // so make sure it becomes the active element at least.
-            theOneBubbleManager.setActiveElement(elementToFocus);
-            // see similar code below
-            BloomSourceBubbles.ShowSourceBubbleForElement(elementToFocus);
-        } else {
-            // It's OK not to focus anything.
+            const focusable = elementToFocus
+                ? $(elementToFocus).find(":focusable")
+                : undefined;
+            // If we were passed an element to focus, it could be a new comic bubble, and we'd like to
+            // be all set to type in it. So we focus it.
+            // I'm not sure whether this is desirable when we found one from data-bloom-active,
+            // but there may be a case where the page gets reloaded while a text-editable bubble is active.
+            if (elementToFocus && focusable) {
+                focusable.focus();
+                // Ideally calling focus above has this as a side effect.
+                // However, the focusin event handler doesn't seem to get called at this point
+                // for image containers, even though we have set tabindex to zero,
+                // so make sure it becomes the active element at least.
+                theOneBubbleManager.setActiveElement(elementToFocus);
+                // see similar code below
+                BloomSourceBubbles.ShowSourceBubbleForElement(elementToFocus);
+            } else {
+                // It's OK not to focus anything.
+            }
         }
     }, bloomQtipUtils.horizontalOverlappingBubblesDelay);
 
@@ -908,7 +911,7 @@ export function SetupElements(
 
     const editableJQuery = $(container).find(".bloom-editable");
 
-    loadLongpressInstructions(editableJQuery);
+    activateLongPressFor(editableJQuery);
 
     //When we do a CTRL+A DEL, FF leaves us with a <br></br> at the start. When the first key is then pressed,
     //a blank line is shown and the letter pressed shows up after that.
@@ -1484,7 +1487,7 @@ async function pasteImpl(imageAvailable: boolean) {
     (<any>CKEDITOR.currentInstance).undoManager.save(true);
 }
 
-export function loadLongpressInstructions(jQuerySetOfMatchedElements) {
+export function activateLongPressFor(jQuerySetOfMatchedElements) {
     // using axios directly because we already have a catch...though not obviously better than the Bloom Api one?
     axios
         .get("/bloom/api/keyboarding/useLongpress")

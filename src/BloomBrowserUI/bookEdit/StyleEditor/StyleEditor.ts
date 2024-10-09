@@ -1001,8 +1001,11 @@ export default class StyleEditor {
     public AdjustFormatButton(element: Element): void {
         const scale = EditableDivUtils.getPageScale();
         const eltBounds = element.getBoundingClientRect();
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-        const parentBounds = element.parentElement!.getBoundingClientRect();
+        const parent = element.parentElement;
+        if (!parent) {
+            return; // the element we're trying to adjust for may have been removed
+        }
+        const parentBounds = parent.getBoundingClientRect();
         const bottom = eltBounds.bottom - parentBounds.top;
         const fmtButton = document.getElementById("formatButton");
 
@@ -1127,12 +1130,6 @@ export default class StyleEditor {
 
         this._previousBox = targetBox;
 
-        let formatButtonFilename = "cogGrey.svg";
-        const isTextOverPicture = targetBox.closest(".bloom-textOverPicture");
-        if (isTextOverPicture) {
-            formatButtonFilename = "cog.svg";
-        }
-
         // Put the format button in the parent translation group. This prevents it being editable,
         // and avoids various complications; also, in WebView2, having it inside the content-editable
         // element somehow prevents ctrl-A from working (BL-12118).
@@ -1148,7 +1145,7 @@ export default class StyleEditor {
         $(targetBox).after(
             '<div id="formatButton" contenteditable="false" class="bloom-ui"><img contenteditable="false" src="' +
                 this._supportFilesRoot +
-                `/img/${formatButtonFilename}"></div>`
+                `/img/cogGrey.svg"></div>`
         );
 
         this.AdjustFormatButton(targetBox);
