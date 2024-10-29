@@ -37,6 +37,7 @@ import OverflowChecker from "../OverflowChecker/OverflowChecker";
 import { MeasureText } from "../../utils/measureText";
 import theOneLocalizationManager from "../../lib/localizationManager/localizationManager";
 import { handlePlayClick } from "./bloomVideo";
+import { kVideoContainerClass, selectVideoContainer } from "./videoUtils";
 
 export interface ITextColorInfo {
     color: string;
@@ -47,11 +48,12 @@ const kComicalGeneratedClass: string = "comical-generated";
 // We could rename this class to "bloom-overPictureElement", but that would involve a migration.
 // For now we're keeping this name for backwards-compatibility, even though now the element could be
 // a video or even another picture.
+// In the process of moving these two definitions to overlayUtils.ts, but duplicating here for now.
 export const kTextOverPictureClass = "bloom-textOverPicture";
 export const kTextOverPictureSelector = `.${kTextOverPictureClass}`;
 const kImageContainerClass = "bloom-imageContainer";
 const kImageContainerSelector = `.${kImageContainerClass}`;
-const kVideoContainerClass = "bloom-videoContainer";
+const kTransformPropName = "bloom-zoomTransformForInitialFocus";
 
 const kOverlayClass = "hasOverlay";
 
@@ -248,7 +250,7 @@ export class BubbleManager {
     // Convert string ending in pixels to a number
     public static pxToNumber(px: string): number {
         if (!px) return 0;
-        return parseInt(px.replace("px", ""));
+        return parseFloat(px.replace("px", ""));
     }
 
     // We usually don't show the image editing buttons on an overlay page.
@@ -276,18 +278,6 @@ export class BubbleManager {
         );
         imageContainers.forEach(container => {
             BubbleManager.hideImageButtonsIfHasOverlays(container);
-        });
-    }
-
-    // When switching to the comicTool from elsewhere (notably the sign language tool), we remove
-    // the 'bloom-selected' class, so the container doesn't have a yellow border like it does in the
-    // sign language tool.
-    public deselectVideoContainers() {
-        const videoContainers: HTMLElement[] = Array.from(
-            document.getElementsByClassName(kVideoContainerClass) as any
-        );
-        videoContainers.forEach(container => {
-            container.classList.remove("bloom-selected");
         });
     }
 
@@ -779,7 +769,7 @@ export class BubbleManager {
         });
     }
 
-    private handleFocusInEvent(ev: Event) {
+    private handleFocusInEvent(ev: FocusEvent) {
         BubbleManager.onFocusSetActiveElement(ev);
     }
 
@@ -865,15 +855,54 @@ export class BubbleManager {
         });
     }
 
+    // If we haven't already, note (in a variable of the top window) the initial zoom level.
+    // This is used by a hack in onFocusSetActiveElement.
+    public static recordInitialZoom(container: HTMLElement) {
+        const zoomTransform = container.ownerDocument.getElementById(
+            "page-scaling-container"
+        )?.style.transform;
+        const topWindowZoomTransfrom = window.top?.[kTransformPropName];
+        if (window.top && zoomTransform && !topWindowZoomTransfrom) {
+            window.top[kTransformPropName] = zoomTransform;
+        }
+    }
+
     // The event handler to be called when something relevant on the page frame gets focus.
     // This will set the active textOverPicture element.
-    public static onFocusSetActiveElement(event: Event) {
+    public static onFocusSetActiveElement(event: FocusEvent) {
         if (BubbleManager.ignoreFocusChanges) return;
         if (BubbleManager.inPlayMode(event.currentTarget as Element)) {
             return;
         }
+
         // The current target is the element we attached the event listener to
         const focusedElement = event.currentTarget as Element;
+
+        // This is a hack to prevent the active bubble changing when we change zoom level.
+        // For some reason I can't track down, the first focusable thing on the page is
+        // given focus during the reload after a zoom change. I think somehow the
+        // browser itself is trying to focus something, and it's not the thing we want.
+        // We have mechanisms to focus what we do want, so we use this trick to ignore
+        // focus events immediately after a zoom change.
+        const zoomTransform = focusedElement.ownerDocument.getElementById(
+            "page-scaling-container"
+        )?.style.transform;
+        const topWindowZoomTransfrom = window.top?.[kTransformPropName];
+        if (window.top && zoomTransform !== topWindowZoomTransfrom) {
+            // We eventually want to reset the saved zoom level to the new one, so
+            // that this method can do its job...mainly allowing the user to tab between overlays.
+            // We don't do it immediately because experience indicates that there may be more than
+            // one focus event to suppress as we load the page. On my fast dev machine a 50ms
+            // delay is enough to catch them all, so I'm going with ten times that. It's not
+            // a catastrophe if we miss a tab key very soon after a zoom change, nor if the delay
+            // is not enough for a very slow machine and so the active bubble moves when it shouldn't.
+            setTimeout(() => {
+                if (window.top) {
+                    window.top[kTransformPropName] = zoomTransform;
+                }
+            }, 500);
+            return;
+        }
 
         // If we focus something on the page that isn't in a bubble, we need to switch
         // to having no active bubble element. Note: we don't want to use focusout
@@ -1034,6 +1063,20 @@ export class BubbleManager {
             // that bubble.
             theOneBubbleManager.turnOnHidingImageButtons();
         }
+        if (this.activeElement) {
+            // We should call this if there is an active element, even if it is not a video,
+            // because it will turn off the 'active video' class that might be on some
+            // non-overlay video.
+            // But if there is no active element we should not, because we might be wanting to
+            // record a non-overlay video and wanting to show that one as active.
+            // Indeed, we might have been called from the code that makes that so.
+            selectVideoContainer(
+                this.activeElement.getElementsByClassName(
+                    "bloom-videoContainer"
+                )[0] as HTMLElement,
+                false
+            );
+        }
     }
 
     // clientX/Y of the mouseDown event in one of the resize handles.
@@ -1087,7 +1130,7 @@ export class BubbleManager {
             return;
         }
         // if the overlay is not the right shape for a contained image, fix it now.
-        this.matchContainerToImage(eltToPutControlsOn);
+        this.adjustContainerAspectRatio(eltToPutControlsOn);
 
         if (!controlFrame) {
             controlFrame = eltToPutControlsOn.ownerDocument.createElement(
@@ -1269,14 +1312,13 @@ export class BubbleManager {
         this.oldHeight = BubbleManager.pxToNumber(style.height);
         this.oldTop = BubbleManager.pxToNumber(style.top);
         this.oldLeft = BubbleManager.pxToNumber(style.left);
-        const imgC = this.activeElement.getElementsByClassName(
-            "bloom-imageContainer"
-        )[0];
-        const img = imgC?.getElementsByTagName("img")[0];
-        if (img && img.style.width) {
-            this.oldImageWidth = BubbleManager.pxToNumber(img.style.width);
-            this.oldImageTop = BubbleManager.pxToNumber(img.style.top);
-            this.oldImageLeft = BubbleManager.pxToNumber(img.style.left);
+        const imgOrVideo = this.getImageOrVideo();
+        if (imgOrVideo && imgOrVideo.style.width) {
+            this.oldImageWidth = BubbleManager.pxToNumber(
+                imgOrVideo.style.width
+            );
+            this.oldImageTop = BubbleManager.pxToNumber(imgOrVideo.style.top);
+            this.oldImageLeft = BubbleManager.pxToNumber(imgOrVideo.style.left);
         }
         document.addEventListener("mousemove", this.continueResizeDrag, {
             capture: true
@@ -1299,6 +1341,21 @@ export class BubbleManager {
     private minWidth = 30; // @MinTextBoxWidth in bubble.less
     private minHeight = 30; // @MinTextBoxHeight in bubble.less
 
+    private getImageOrVideo(): HTMLElement | undefined {
+        // It will have one or the other or neither, but not both, so it doesn't much matter
+        // which we search for first. But images are probably more common.
+        const imgC = this.activeElement?.getElementsByClassName(
+            "bloom-imageContainer"
+        )[0];
+        const img = imgC?.getElementsByTagName("img")[0];
+        if (img) return img;
+        const videoC = this.activeElement?.getElementsByClassName(
+            "bloom-videoContainer"
+        )[0];
+        const video = videoC?.getElementsByTagName("video")[0];
+        return video;
+    }
+
     // handles mouse move while dragging a resize handle.
     private continueResizeDrag = (event: MouseEvent) => {
         if (event.buttons !== 1 || !this.activeElement) {
@@ -1318,14 +1375,11 @@ export class BubbleManager {
         const deltaX = event.clientX - this.startResizeDragX;
         const deltaY = event.clientY - this.startResizeDragY;
         const style = this.activeElement.style;
-        const imgC = this.activeElement.getElementsByClassName(
-            "bloom-imageContainer"
-        )[0];
-        const img = imgC?.getElementsByTagName("img")[0];
+        const imgOrVideo = this.getImageOrVideo();
         // The slope of a line from nw to se (since y is positive down, this is a positive slope).
         // If we're moving one of the other points we will negate it to get the slope of the line
         // from ne to sw
-        let slope = img ? this.oldHeight / this.oldWidth : 0;
+        let slope = imgOrVideo ? this.oldHeight / this.oldWidth : 0;
 
         // Default is all unchanged...we will adjust the appropriate ones depending on how far
         // the mouse moved and which corner is being dragged.
@@ -1455,12 +1509,12 @@ export class BubbleManager {
         // Now, if the image is not cropped, it will resize automatically (width: 100% from
         // stylesheet, height unset so automatically scales with width). If it is cropped,
         // we need to resize it so that it stays the same amount cropped visually.
-        if (img?.style.width) {
+        if (imgOrVideo?.style.width) {
             const scale = newWidth / this.oldWidth;
-            img.style.width = this.oldImageWidth * scale + "px";
+            imgOrVideo.style.width = this.oldImageWidth * scale + "px";
             // to keep the same part of it showing, we need to scale left and top the same way.
-            img.style.left = this.oldImageLeft * scale + "px";
-            img.style.top = this.oldImageTop * scale + "px";
+            imgOrVideo.style.left = this.oldImageLeft * scale + "px";
+            imgOrVideo.style.top = this.oldImageTop * scale + "px";
         }
         // Finally, adjust various things that are affected by the new size.
         this.alignControlFrameWithActiveElement();
@@ -1487,6 +1541,17 @@ export class BubbleManager {
     private initialCropBubbleHeight: number;
     private initialCropBubbleTop: number;
     private initialCropBubbleLeft: number;
+    // If we're dragging a crop control, we generally want to snap when the edege
+    // of the (underlying, uncropped) image is close to the corresponding edge
+    // of the overlay in which it is cropped...that is, no cropping on that edge,
+    // nor have we (this cycle) expanded the image by dragging the crop handle outward.
+    // However, if the drag started in the crop position we disable cropping so small
+    // adjustments can be made. If the pointer moves more than the snap distance,
+    // we resume cropping. (Cropping can also be disabled by holding down the ctrl key).
+    // This variable is true when we are in that state where cropping is disabled
+    // because we've made only a small movement from an uncropped state. It is
+    // independent of the ctrl key state (though irrelevant if it is down).
+    private cropSnapDisabled: boolean = false;
 
     private currentDragSide: string | undefined;
     // For both resize and crop
@@ -1532,6 +1597,37 @@ export class BubbleManager {
                     this.activeElement.style.left
                 );
                 this.lastCropControl = event.currentTarget as HTMLElement;
+            }
+            // Determine whether the drag is starting in the "no cropping" position
+            // and we therefore want to disable cropping until we move a bit.
+            switch (side) {
+                case "n":
+                    this.cropSnapDisabled = this.oldImageTop === 0;
+                    break;
+                case "w":
+                    this.cropSnapDisabled = this.oldImageLeft === 0;
+                    break;
+                case "s":
+                    // initialCropImageTop + initialCropImageHeight is where the bottom of the image is.
+                    // this.oldHeight is where the bottom of the overlay is. We're in this state if
+                    // they are equal. There can be fractions of pixels involved, so we allow up to
+                    // a pixel and still consider it uncropped.
+                    this.cropSnapDisabled =
+                        Math.abs(
+                            this.initialCropImageTop +
+                                this.initialCropImageHeight -
+                                this.oldHeight
+                        ) < 1;
+                    break;
+                case "e":
+                    // Similarly figure whether the right edge is uncropped.
+                    this.cropSnapDisabled =
+                        Math.abs(
+                            this.initialCropImageLeft +
+                                this.initialCropImageWidth -
+                                this.oldWidth
+                        ) < 1;
+                    break;
             }
             if (!img.style.width) {
                 // From here on it should stay this width unless we decide otherwise.
@@ -1629,8 +1725,28 @@ export class BubbleManager {
 
         let newBubbleWidth = this.oldWidth; // default
         let newBubbleHeight = this.oldHeight;
+        // ctrl key suppresses snapping, and we also suppress it if we started
+        // snapped and haven't moved far. This is to allow very small adjustments.
+        const snapping = !event.ctrlKey && !this.cropSnapDisabled;
+        const snapDelta = 5;
+        // Each case begins by figuring out whether, if we are snapping, we should snap.
+        // Next it figures out whether we've moved far enough to end the "start at zero"
+        // non-snapping. Then it figures out a first approximation of how the overlay and image
+        // position and size should change, without considering the possibility that
+        // dragging outward would leave white space. A later step adjusts for that.
         switch (this.currentDragSide) {
             case "n":
+                if (
+                    snapping &&
+                    Math.abs(this.oldImageTop - deltaY) < snapDelta
+                ) {
+                    deltaY = this.oldImageTop;
+                }
+                if (Math.abs(this.oldImageTop - deltaY) > snapDelta) {
+                    // The distance moved is substantial, time to re-enable snapping
+                    // for future moves (without ctrl-key).
+                    this.cropSnapDisabled = false;
+                }
                 newBubbleHeight = Math.max(
                     this.oldHeight - deltaY,
                     this.minHeight
@@ -1646,6 +1762,37 @@ export class BubbleManager {
                 img.style.top = `${this.oldImageTop - deltaY}px`;
                 break;
             case "s":
+                // These variables would make the next line more comprehensible, but they only apply
+                // to this case and lint does not like declaring variables inside a switch.
+                // Essentially we're trying to determine how far apart the bottom of the image and the bottom of the overlay are.
+                // const heightThatMathchesBottomOfImage = this.initialCropImageTop + this.initialCropImageHeight;
+                // const newHeight = this.oldHeight + deltaY;
+                if (
+                    snapping &&
+                    Math.abs(
+                        this.initialCropImageTop +
+                            this.initialCropImageHeight -
+                            this.oldHeight -
+                            deltaY
+                    ) < snapDelta
+                ) {
+                    deltaY =
+                        this.initialCropImageTop +
+                        this.initialCropImageHeight -
+                        this.oldHeight;
+                }
+                if (
+                    Math.abs(
+                        this.initialCropImageTop +
+                            this.initialCropImageHeight -
+                            this.oldHeight -
+                            deltaY
+                    ) > snapDelta
+                ) {
+                    // The distance moved is substantial, time to re-enable snapping
+                    // for future moves (without ctrl-key).
+                    this.cropSnapDisabled = false;
+                }
                 newBubbleHeight = Math.max(
                     this.oldHeight + deltaY,
                     this.minHeight
@@ -1654,6 +1801,34 @@ export class BubbleManager {
                 this.activeElement.style.height = `${newBubbleHeight}px`;
                 break;
             case "e":
+                // const widthThatMathchesRightOfImage = this.initialCropImageLeft + this.initialCropImageWidth;
+                // const newWidth = this.oldWidth + deltaX;
+                if (
+                    snapping &&
+                    Math.abs(
+                        this.initialCropImageLeft +
+                            this.initialCropImageWidth -
+                            this.oldWidth -
+                            deltaX
+                    ) < snapDelta
+                ) {
+                    deltaX =
+                        this.initialCropImageLeft +
+                        this.initialCropImageWidth -
+                        this.oldWidth;
+                }
+                if (
+                    Math.abs(
+                        this.initialCropImageLeft +
+                            this.initialCropImageWidth -
+                            this.oldWidth -
+                            deltaX
+                    ) > snapDelta
+                ) {
+                    // The distance moved is substantial, time to re-enable snapping
+                    // for future moves (without ctrl-key).
+                    this.cropSnapDisabled = false;
+                }
                 newBubbleWidth = Math.max(
                     this.oldWidth + deltaX,
                     this.minWidth
@@ -1662,6 +1837,17 @@ export class BubbleManager {
                 this.activeElement.style.width = `${newBubbleWidth}px`;
                 break;
             case "w":
+                if (
+                    snapping &&
+                    Math.abs(this.oldImageLeft - deltaX) < snapDelta
+                ) {
+                    deltaX = this.oldImageLeft;
+                }
+                if (Math.abs(this.oldImageLeft - deltaX) > snapDelta) {
+                    // The distance moved is substantial, time to re-enable snapping
+                    // for future moves (without ctrl-key).
+                    this.cropSnapDisabled = false;
+                }
                 newBubbleWidth = Math.max(
                     this.oldWidth - deltaX,
                     this.minWidth
@@ -1824,24 +2010,37 @@ export class BubbleManager {
     // If this overlay contains an image, and it has not already been adjusted so that the overlay
     // dimensions have the same aspect ratio as the image, make it so, reducing either height or
     // width as necessary.
-    private matchContainerToImage(overlay: HTMLElement) {
-        const container = overlay.getElementsByClassName(
-            "bloom-imageContainer"
-        )[0];
-        // Don't go straight from overlay to img. A text box, for example, contains an img
-        // that is the cog wheel for the format dialog. We don't want to match the overlay
-        // aspect ratio to that.
-        const img = container?.getElementsByTagName("img")[0];
-        if (!img) return;
-        if (img.style.width) {
+    private adjustContainerAspectRatio(overlay: HTMLElement) {
+        const imgOrVideo = this.getImageOrVideo();
+        if (!imgOrVideo) return;
+        if (imgOrVideo.style.width) {
             // we've already done cropping on this image, so we should not force the
             // container back to the original image shape.
             return;
         }
         const containerWidth = overlay.clientWidth;
         const containerHeight = overlay.clientHeight;
-        const imgWidth = img.naturalWidth;
-        const imgHeight = img.naturalHeight;
+        let imgWidth = 1;
+        let imgHeight = 1;
+        if (imgOrVideo instanceof HTMLImageElement) {
+            imgWidth = imgOrVideo.naturalWidth;
+            imgHeight = imgOrVideo.naturalHeight;
+        } else {
+            const video = imgOrVideo as HTMLVideoElement;
+            imgWidth = video.videoWidth;
+            imgHeight = video.videoHeight;
+            if (imgWidth === 0 || imgHeight === 0) {
+                // video not ready yet, try again later.
+                // I'm not sure this has ever been tested; the dimensions seem to be
+                // always available by the time this routine is called.
+                video.addEventListener(
+                    "loadedmetadata",
+                    () => this.adjustContainerAspectRatio(overlay),
+                    { once: true }
+                );
+                return;
+            }
+        }
         const imgRatio = imgWidth / imgHeight;
         const containerRatio = containerWidth / containerHeight;
         let newHeight = containerHeight;
@@ -1862,7 +2061,10 @@ export class BubbleManager {
             }
         }
         const oldHeight = BubbleManager.pxToNumber(overlay.style.height);
-        overlay.style.height = `${newHeight}px`;
+        if (Math.abs(oldHeight - newHeight) > 0.1) {
+            // don't let small rounding errors accumulate
+            overlay.style.height = `${newHeight}px`;
+        }
         // and move container down so image does not move
         const oldTop = BubbleManager.pxToNumber(overlay.style.top);
         overlay.style.top = `${oldTop + (oldHeight - newHeight) / 2}px`;
@@ -1870,7 +2072,9 @@ export class BubbleManager {
         overlay.style.width = `${newWidth}px`;
         // and move container right so image does not move
         const oldLeft = BubbleManager.pxToNumber(overlay.style.left);
-        overlay.style.left = `${oldLeft + (oldWidth - newWidth) / 2}px`;
+        if (Math.abs(oldWidth - newWidth) > 0.1) {
+            overlay.style.left = `${oldLeft + (oldWidth - newWidth) / 2}px`;
+        }
     }
 
     // When the image is changed in a bubble (e.g., choose or paste image),
@@ -1891,7 +2095,7 @@ export class BubbleManager {
         img.style.left = "";
         img.style.top = "";
         // Get the aspect ratio right
-        this.matchContainerToImage(overlay);
+        this.adjustContainerAspectRatio(overlay);
         // and align the controls with the new image size
         this.alignControlFrameWithActiveElement();
     }
@@ -2014,9 +2218,23 @@ export class BubbleManager {
             controlFrameRect.width / 2 -
             (contextControlsWidth / 2) * scale;
         let top = controlFrameRect.top + window.scrollY;
+        contextControl.style.visibility = "visible";
         if (controlsAbove) {
             // Bottom 11 px above the top of the control frame.
-            top -= contextControlRect.height + 11;
+            if (contextControlRect.height > 0) {
+                top -= contextControlRect.height + 11;
+            } else {
+                // We get a zero height when it is initially hidden. Place it in about the right
+                // place so we can measure it and try again once it is (invisibly) rendered.
+                top -= 30 + 11;
+                contextControl.style.visibility = "hidden";
+                setTimeout(() => {
+                    this.adjustContextControlPosition(
+                        controlFrame,
+                        controlsAbove
+                    );
+                }, 0);
+            }
         } else {
             // Top 11 px below the bottom of the control frame
             top += controlFrameRect.height + 11;
@@ -2858,6 +3076,7 @@ export class BubbleManager {
             handlePlayClick(event, true);
             return;
         }
+        this.mouseIsDown = false;
 
         if (this.bubbleToDrag) {
             // if we're doing a resize or drag, we don't want ordinary mouseup activity
@@ -4525,7 +4744,7 @@ export class BubbleManager {
             // Not sure about keeping this. Apparently at one point there could be some left-over controls.
             // But we clean out everything bloom-ui when we save a page, so they couldn't persist long.
             // And now I've added these video controls, which get added before we call this, so it was
-            // destroying stff we want. For now I'm just filtering out the new controls and NOT removing them.
+            // destroying stuff we want. For now I'm just filtering out the new controls and NOT removing them.
             thisOverPictureElement
                 .find(".bloom-ui")
                 .filter(
@@ -4847,6 +5066,10 @@ export function bubbleDescription(e: Element | null | undefined): string {
         if (img) {
             return result + "with image : " + img.getAttribute("src");
         }
+    }
+    const videoSrc = elt.getElementsByTagName("source")[0];
+    if (videoSrc) {
+        return result + "with video " + videoSrc.getAttribute("src");
     }
     // Enhance: look for videoContainer similarly
     else {

@@ -20,6 +20,7 @@ import BloomNotices from "./bloomNotices";
 import BloomSourceBubbles from "../sourceBubbles/BloomSourceBubbles";
 import BloomHintBubbles from "./BloomHintBubbles";
 import {
+    bubbleDescription,
     BubbleManager,
     initializeBubbleManager,
     kTextOverPictureClass,
@@ -53,7 +54,6 @@ import {
     postThatMightNavigate
 } from "../../utils/bloomApi";
 import { showRequestStringDialog } from "../../react_components/RequestStringDialog";
-import { fixUpDownArrowEventHandler } from "./arrowKeyWorkaroundManager";
 
 import { hookupLinkHandler } from "../../utils/linkHandler";
 import {
@@ -66,6 +66,7 @@ import { removeToolboxMarkup } from "../toolbox/toolbox";
 import { IBloomWebSocketEvent } from "../../utils/WebSocketManager";
 import { setupDragActivityTabControl } from "../toolbox/dragActivity/dragActivityTool";
 import BloomMessageBoxSupport from "../../utils/bloomMessageBoxSupport";
+import { addScrollbarsToPage, cleanupNiceScroll } from "./niceScrollBars";
 
 // Allows toolbox code to make an element properly in the context of this iframe.
 export function makeElement(
@@ -153,6 +154,7 @@ function Cleanup() {
 
     cleanupImages();
     cleanupOrigami();
+    cleanupNiceScroll();
 }
 
 //add a delete button which shows up when you hover
@@ -438,6 +440,7 @@ export function SetupElements(
     elementToFocus?: HTMLElement
 ) {
     recordWhatThisPageLooksLikeForSanityCheck(container);
+    BubbleManager.recordInitialZoom(container);
 
     SetupImagesInContainer(container);
 
@@ -862,10 +865,32 @@ export function SetupElements(
                     (window.top as any).lastPageId = currentPageId;
                 }
             }
-            if (!elementToFocus) {
-                // Make sure the active element is cleared if we're not setting it.
-                theOneBubbleManager.setActiveElement(undefined);
-            }
+            // If we don't have some specific reason to focus on a particular overlay, we
+            // don't want to arbitrarily select one. It seems the browser will try
+            // to focus something, and sometimes it doesn't make a good choice, especially after
+            // changing zoom, which for some unknown reason seems to make it want to focus the
+            // first thing on the page that CAN be focused. And usually we automatically activate
+            // an overlay that gets focus.
+            // Prior to /4d9ff2a0860d78ecd96771a93a839ce60ab7a8d3, we made a call here to bubbleManager
+            // to tell it to ignore the next focusIn event. That was dubious and fragile.
+            // Then just prior to this commit, we were explicitly setting the active element to undefined
+            // here, but (since this is in a timeout) that could undo (for example) the sign language tool's
+            // attempt to pick some video as the one it applies to.
+            // In this commit, I've added code to specifically ignore focus events that immediately
+            // follow change of zoom. As far as I can tell, it is therefore no longer necessary
+            // to set the active element to undefined here. When we're loading a page, active element
+            // will be unset initially. If something (e.g., sign language tool) sets an initial
+            // active element, we don't want to unset it.
+            // There may, of course, be other circumstances we haven't discovered yet where the
+            // browser tries to focus the wrong thing. But if we restore this, we need to find
+            // some other way that the sign language tool can set an initial active element
+            // that will not be undone by this code. It's possible that data-bloom-active could be
+            // used, but note that currently it only applies if we're re-loading the same page.
+            // The sign language tool wants to be able to select a video (if any) on any page we load.
+            // if (!elementToFocus) {
+            //     // Make sure the active element is cleared if we're not setting it.
+            //     theOneBubbleManager.setActiveElement(undefined);
+            // }
 
             const focusable = elementToFocus
                 ? $(elementToFocus).find(":focusable")
@@ -912,45 +937,6 @@ export function SetupElements(
     const editableJQuery = $(container).find(".bloom-editable");
 
     activateLongPressFor(editableJQuery);
-
-    //When we do a CTRL+A DEL, FF leaves us with a <br></br> at the start. When the first key is then pressed,
-    //a blank line is shown and the letter pressed shows up after that.
-    //This detects that situation when we type the first key after the deletion, and first deletes the <br></br>.
-    editableJQuery.keypress(event => {
-        // this is causing a worse problem, (preventing us from typing empty lines to move the start of the
-        // text down), so we're going to live with the empty space for now.
-        // TODO: perhaps we can act when the DEL or Backspace occurs and then detect this situation and clean it up.
-        //         if ($(event.target).text() == "") { //NB: the browser inspector shows <br></br>, but innerHTML just says "<br>"
-        //            event.target.innerHTML = "";
-        //        }
-    });
-    //This detects that situation when we do CTRL+A and then type a letter, instead of DEL
-    editableJQuery.keyup(function(event) {
-        //console.log(event.target.innerHTML);
-        // If they pressed a letter instead of DEL, we get this case:
-        //NB: the browser inspector shows <br></br>, but innerHTML just says "<br>"
-        if ($(event.target).find("#formatButton").length === 0) {
-            // they have also deleted the formatButton, so put it back in
-
-            // REVIEW: this shows that we're doing the attaching on the first character entered,
-            // even though it appears the editor was already attached.
-            // So we actually attach twice. That's ok, the editor handles that, but I don't know why
-            // we're passing the if, and it could be improved.
-            // console.log('attaching');
-            if ($(this).closest(".bloom-userCannotModifyStyles").length === 0)
-                editor.AttachToBox(this);
-        } else {
-            // already have a format cog, better make sure it's in the right place
-            editor.AdjustFormatButton(this);
-        }
-    });
-
-    // Up and down arrow navigation don't work in editables with paragraphs that are flexboxes.
-    //   (See bug report: https://bugzilla.mozilla.org/show_bug.cgi?id=1414884)
-    // So add our own custom handler to intercept the event and if applicable, fix it ourselves.
-    editableJQuery.each((dummy, element) => {
-        element.addEventListener("keydown", fixUpDownArrowEventHandler);
-    });
 
     // make any added over-picture elements draggable and clickable
     if (theOneBubbleManager) {
@@ -1161,7 +1147,9 @@ export function bootstrap() {
         .each((index: number, element: Element) => {
             attachToCkEditor(element);
         });
-
+    if ($("div.bloom-page").length === 1) {
+        addScrollbarsToPage($("div.bloom-page")[0]);
+    }
     // We want to do this as late in the page setup process as possible because a
     // mouse zoom event will regenerate the page, and various things we do in the process
     // of starting up a page don't like it if the page we are loading is already unloading.
@@ -1244,6 +1232,7 @@ function removeOrigami() {
     for (let i = 0; i < textLabels.length; i++) {
         textLabels[i].remove();
     }
+    cleanupNiceScroll(); // don't leave the nicescroll debris around
 }
 
 // This is invoked from C# when we are about to change pages. It removes markup we don't want to save.
@@ -1574,14 +1563,14 @@ export function attachToCkEditor(element) {
         // (Note that offsets are not defined if it's not visible.)
         if (show) {
             updateCkEditorButtonStatus(editor);
-            const barTop = bar.offset().top;
+            const barTop = bar.offset()?.top ?? 0;
             const div = mapCkeditDiv[editor.id];
             const rect = div.getBoundingClientRect();
             const parent = bar.scrollParent();
             const scrollTop = parent ? parent.scrollTop() : 0;
             const boxTop = rect.top + scrollTop;
             if (boxTop - barTop < 5) {
-                const barLeft = bar.offset().left;
+                const barLeft = bar.offset()?.left ?? 0;
                 const barHeight = bar.height();
                 bar.offset({ top: boxTop - barHeight, left: barLeft });
             }
