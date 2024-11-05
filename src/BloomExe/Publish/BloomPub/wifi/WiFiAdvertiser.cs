@@ -244,39 +244,32 @@ namespace Bloom.Publish.BloomPub.wifi
 
         // Find and return the name of the Wi-Fi network -- i.e., the SSID -- that we are currently
         // connected to.
-        // Note that if we are on a wired ethernet connection there won't be an SSID, and we will
-        // return an empty string.
+        // If we are on a wired (ethernet) connection there won't be an SSID, and we will return an
+        // empty string.
         private string getSSID()
         {
-            string ssid = "";
-
             // Based on code from:
-            // https://stackoverflow.com/questions/39953600/run-a-process-silently-in-background-without-any-window
-            // https://stackoverflow.com/questions/39346232/how-to-get-currently-connected-wifi-ssid-in-c-sharp-using-wmi-or-system-net-netw
-            Debug.WriteLine("WM, WiFiAdvertiser::getSSID, creating netsh process");
-            // TODO: want to start this process without also opening a UI dialog, if possible...
-            //System.Diagnostics.Process p = new System.Diagnostics.Process();
-            //p.StartInfo.FileName = "netsh.exe";
-            //p.StartInfo.Arguments = "wlan show interfaces";
-            //p.StartInfo.UseShellExecute = false;
-            //p.StartInfo.RedirectStandardOutput = true;
-            //p.StartInfo.RedirectStandardError = true;
-            //p.Start();
+            //    https://stackoverflow.com/questions/39953600/run-a-process-silently-in-background-without-any-window
+            //    https://stackoverflow.com/questions/39346232/how-to-get-currently-connected-wifi-ssid-in-c-sharp-using-wmi-or-system-net-netw
+            // The above works, but also has the annoying near-subliminal behavior of showing a dialog
+            // for a fraction of a second. Setting the element 'CreateNoWindow' as true suppresses this.
+
+            //Debug.WriteLine("WM, WiFiAdvertiser::getSSID, creating netsh process");
 
             ProcessStartInfo psi = new ProcessStartInfo();
             psi.FileName = "netsh.exe";
             psi.UseShellExecute = false;
             psi.RedirectStandardError = true;
             psi.RedirectStandardOutput = true;
-            psi.CreateNoWindow = true; // without this a dialog shows up very briefly; not cool
+            psi.CreateNoWindow = true;
             psi.Arguments = "wlan show interfaces";
             Process proc = Process.Start(psi);
             proc.WaitForExit();
 
-            //Debug.WriteLine("WM, WiFiAdvertiser::getSSID, started netsh process");
-
+            string ssid = "";
             string sout = proc.StandardOutput.ReadToEnd();
             string serr = proc.StandardError.ReadToEnd();
+
             if (proc.ExitCode != 0)
             {
                 throw new Exception(
@@ -289,10 +282,11 @@ namespace Bloom.Publish.BloomPub.wifi
                 );
             }
 
-            Debug.WriteLine("WM, WiFiAdvertiser::getSSID, did ReadToEnd(), dig in");
+            Debug.WriteLine("WM, WiFiAdvertiser::getSSID, did ReadToEnd(), now process");
 
             if (sout != "")
             {
+                Debug.WriteLine("WM, WiFiAdvertiser::getSSID, ProcessStartInfo = " + sout);
                 Debug.WriteLine("WM, WiFiAdvertiser::getSSID, indexing for SSID");
                 if (sout.IndexOf("SSID") != -1)
                 {
@@ -323,8 +317,11 @@ namespace Bloom.Publish.BloomPub.wifi
             {
                 Debug.WriteLine("WM, WiFiAdvertiser::getSSID, no wlan info available");
             }
-            //p.WaitForExit();
 
+            // Clean up and return.
+            Debug.WriteLine("WM, WiFiAdvertiser::getSSID, close and dispose...");
+            proc.Close();
+            proc.Dispose();
             Debug.WriteLine("WM, WiFiAdvertiser::getSSID, returning ssid = " + ssid);
             return ssid;
         }
