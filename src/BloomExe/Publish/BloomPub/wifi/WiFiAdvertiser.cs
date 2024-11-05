@@ -243,96 +243,60 @@ namespace Bloom.Publish.BloomPub.wifi
         }
 
         // Find and return the name of the Wi-Fi network -- i.e., the SSID -- that we are currently
-        // connected to. Based on code from
-        // https://www.iditect.com/program-example/how-to-get-currently-connected-wifi-ssid-in-c-using-wmi-or-systemnetnetworkinformation-windows-10.html
+        // connected to.
         // Note that if we are on a wired ethernet connection there won't be an SSID, and we will
         // return an empty string.
         private string getSSID()
         {
             string ssid = "";
 
-            //try
-            //{
-            //    foreach (NetworkInterface nic in NetworkInterface.GetAllNetworkInterfaces())
-            //    {
-            //        if (
-            //            nic.NetworkInterfaceType == NetworkInterfaceType.Wireless80211
-            //            && nic.OperationalStatus == OperationalStatus.Up
-            //        )
-            //        {
-            //            //IPInterfaceProperties ipProps = nic.GetIPProperties();
-            //            //ipProps.
-            //            ssid = nic.GetIPProperties()
-            //                .UnicastAddresses.FirstOrDefault()
-            //                ?.Address.ToString(); // no: this returns the IPv4 address, not the SSID
-            //            //nic.Name = "Wi-Fi"
-            //            //nic.Description = "Intel(R) Dual Band Wireless-AC 8265"
-            //            Debug.WriteLine("WM, WiFiAdvertiser::getSSID, ssid = " + ssid);
-            //            Debug.WriteLine("WM, WiFiAdvertiser::getSSID, nic.Name = " + nic.Name);
-            //            Debug.WriteLine(
-            //                "WM, WiFiAdvertiser::getSSID, nic.Description = " + nic.Description
-            //            );
-            //
-            //            break;
-            //        }
-            //    }
-            //}
-            //catch (Exception ex)
-            //{
-            //    Debug.WriteLine("WiFiAdvertiser::getSSID, Error: " + ex.Message);
-            //}
-            //int i = 1;
-            //try
-            //{
-            //    ManagementObjectSearcher searcher = new ManagementObjectSearcher(
-            //        "root\\WMI",
-            //        "SELECT * FROM MSNdis_80211_ServiceSetIdentifier"
-            //    );
-            //    ManagementObjectCollection objCollection = searcher.Get();
-            //
-            //    foreach (ManagementObject obj in objCollection)
-            //    //foreach (ManagementObject obj in searcher.Get())
-            //    {
-            //        //    byte[] ssidBytes = (byte[])obj["Ndis80211SsId"];
-            //        //    //-- no, something in this try block raises exception "Not supported"
-            //        //
-            //        //    // Convert byte array to string
-            //        //    ssid = System.Text.Encoding.ASCII.GetString(ssidBytes).Trim('\0');
-            //        //    Debug.WriteLine("WM, WiFiAdvertiser::getSSID, SSID = " + ssid); // WM, temporary
-            //        //    break; // Get the first SSID found (usually the currently connected one)
-            //
-            //        Debug.WriteLine("WM, WiFiAdvertiser::getSSID, i = " + i++); // WM, temporary
-            //    }
-            //}
-            //catch (Exception ex)
-            //{
-            //    Debug.WriteLine("WiFiAdvertiser::getSSID, Error: " + ex.Message);
-            //}
-            //
-            //Debug.WriteLine("WM, WiFiAdvertiser::getSSID, done: i = " + i); // WM, temporary
-
-            //wlan = new WlanClient();
-
             // Based on code from:
-            // https: //stackoverflow.com/questions/39346232/how-to-get-currently-connected-wifi-ssid-in-c-sharp-using-wmi-or-system-net-netw
+            // https://stackoverflow.com/questions/39953600/run-a-process-silently-in-background-without-any-window
+            // https://stackoverflow.com/questions/39346232/how-to-get-currently-connected-wifi-ssid-in-c-sharp-using-wmi-or-system-net-netw
             Debug.WriteLine("WM, WiFiAdvertiser::getSSID, creating netsh process");
             // TODO: want to start this process without also opening a UI dialog, if possible...
-            System.Diagnostics.Process p = new System.Diagnostics.Process();
-            p.StartInfo.FileName = "netsh.exe";
-            p.StartInfo.Arguments = "wlan show interfaces";
-            p.StartInfo.UseShellExecute = false;
-            p.StartInfo.RedirectStandardOutput = true;
-            p.Start();
-            Debug.WriteLine("WM, WiFiAdvertiser::getSSID, started netsh process");
+            //System.Diagnostics.Process p = new System.Diagnostics.Process();
+            //p.StartInfo.FileName = "netsh.exe";
+            //p.StartInfo.Arguments = "wlan show interfaces";
+            //p.StartInfo.UseShellExecute = false;
+            //p.StartInfo.RedirectStandardOutput = true;
+            //p.StartInfo.RedirectStandardError = true;
+            //p.Start();
 
-            string s = p.StandardOutput.ReadToEnd();
-            Debug.WriteLine("WM, WiFiAdvertiser::getSSID, did ReadToEnd()");
-            if (s != "")
+            ProcessStartInfo psi = new ProcessStartInfo();
+            psi.FileName = "netsh.exe";
+            psi.UseShellExecute = false;
+            psi.RedirectStandardError = true;
+            psi.RedirectStandardOutput = true;
+            psi.CreateNoWindow = true; // without this a dialog shows up very briefly; not cool
+            psi.Arguments = "wlan show interfaces";
+            Process proc = Process.Start(psi);
+            proc.WaitForExit();
+
+            //Debug.WriteLine("WM, WiFiAdvertiser::getSSID, started netsh process");
+
+            string sout = proc.StandardOutput.ReadToEnd();
+            string serr = proc.StandardError.ReadToEnd();
+            if (proc.ExitCode != 0)
+            {
+                throw new Exception(
+                    "netsh exit code: "
+                        + proc.ExitCode.ToString()
+                        + " "
+                        + (!string.IsNullOrEmpty(serr) ? " " + sout : "")
+                        + " "
+                        + (!string.IsNullOrEmpty(sout) ? " " + sout : "")
+                );
+            }
+
+            Debug.WriteLine("WM, WiFiAdvertiser::getSSID, did ReadToEnd(), dig in");
+
+            if (sout != "")
             {
                 Debug.WriteLine("WM, WiFiAdvertiser::getSSID, indexing for SSID");
-                if (s.IndexOf("SSID") != -1)
+                if (sout.IndexOf("SSID") != -1)
                 {
-                    ssid = s.Substring(s.IndexOf("SSID"));
+                    ssid = sout.Substring(sout.IndexOf("SSID"));
                     ssid = ssid.Substring(ssid.IndexOf(":"));
                     ssid = ssid.Substring(2, ssid.IndexOf("\n")).Trim();
                     Debug.WriteLine("WM, WiFiAdvertiser::getSSID, ssid = " + ssid);
@@ -343,9 +307,9 @@ namespace Bloom.Publish.BloomPub.wifi
                 }
 
                 Debug.WriteLine("WM, WiFiAdvertiser::getSSID, indexing for Signal");
-                if (s.IndexOf("Signal") != -1)
+                if (sout.IndexOf("Signal") != -1)
                 {
-                    string sig = s.Substring(s.IndexOf("Signal"));
+                    string sig = sout.Substring(sout.IndexOf("Signal"));
                     sig = sig.Substring(sig.IndexOf(":"));
                     sig = sig.Substring(2, sig.IndexOf("\n")).Trim();
                     Debug.WriteLine("WM, WiFiAdvertiser::getSSID, signal = " + sig);
@@ -359,9 +323,9 @@ namespace Bloom.Publish.BloomPub.wifi
             {
                 Debug.WriteLine("WM, WiFiAdvertiser::getSSID, no wlan info available");
             }
-            p.WaitForExit();
-            Debug.WriteLine("WM, WiFiAdvertiser::getSSID, netsh process exited");
+            //p.WaitForExit();
 
+            Debug.WriteLine("WM, WiFiAdvertiser::getSSID, returning ssid = " + ssid);
             return ssid;
         }
 
