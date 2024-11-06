@@ -16,6 +16,7 @@ using static Microsoft.WindowsAPICodePack.Shell.PropertySystem.SystemProperties.
 using System.Security.Cryptography;
 using SIL.Windows.Forms.Progress;
 using NuGet;
+using SimpleWifi;
 
 namespace Bloom.Publish.BloomPub.wifi
 {
@@ -248,80 +249,109 @@ namespace Bloom.Publish.BloomPub.wifi
         // empty string.
         private string getSSID()
         {
-            // Based on code from:
-            //    https://stackoverflow.com/questions/39953600/run-a-process-silently-in-background-without-any-window
-            //    https://stackoverflow.com/questions/39346232/how-to-get-currently-connected-wifi-ssid-in-c-sharp-using-wmi-or-system-net-netw
-            // The above works, but also has the annoying near-subliminal behavior of showing a dialog
-            // for a fraction of a second. Setting the element 'CreateNoWindow' as true suppresses this.
+            //// Based on code from:
+            ////    https://stackoverflow.com/questions/39953600/run-a-process-silently-in-background-without-any-window
+            ////    https://stackoverflow.com/questions/39346232/how-to-get-currently-connected-wifi-ssid-in-c-sharp-using-wmi-or-system-net-netw
+            //// The above works, but also has the annoying near-subliminal behavior of showing a dialog
+            //// for a fraction of a second. Setting the element 'CreateNoWindow' as true suppresses this.
+            ////
+            //// I spent too long looking for a way to do this that is lighter weight, that doesn't
+            //// require spinning up (and then down) a new process. I found some but none, yet, have worked.
+            //// Planning to look into one more: SimpleWifi.
+            //
+            //ProcessStartInfo psi = new ProcessStartInfo();
+            //psi.FileName = "netsh.exe";
+            //psi.UseShellExecute = false;
+            //psi.RedirectStandardError = true;
+            //psi.RedirectStandardOutput = true;
+            //psi.CreateNoWindow = true;
+            //psi.Arguments = "wlan show interfaces";
+            //Process proc = Process.Start(psi);
+            //proc.WaitForExit();
+            //
+            //string ssid = "";
+            //string sout = proc.StandardOutput.ReadToEnd();
+            ////string serr = proc.StandardError.ReadToEnd();
+            //
+            //if (proc.ExitCode != 0)
+            //{
+            //    throw new Exception(
+            //        "netsh exit code: "
+            //            + proc.ExitCode.ToString()
+            //            //+ " "
+            //            //+ (!string.IsNullOrEmpty(serr) ? " " + sout : "")
+            //            + " "
+            //            + (!string.IsNullOrEmpty(sout) ? " " + sout : "")
+            //    );
+            //}
+            //
+            ////Debug.WriteLine("WM, WiFiAdvertiser::getSSID, did ReadToEnd(), now process");
+            //
+            //if (sout != "")
+            //{
+            //    Debug.WriteLine("WM, WiFiAdvertiser::getSSID, ProcessStartInfo = " + sout); // WM, show all of it
+            //    Debug.WriteLine("WM, WiFiAdvertiser::getSSID, indexing for SSID");
+            //    if (sout.IndexOf("SSID") != -1)
+            //    {
+            //        ssid = sout.Substring(sout.IndexOf("SSID"));
+            //        ssid = ssid.Substring(ssid.IndexOf(":"));
+            //        ssid = ssid.Substring(2, ssid.IndexOf("\n")).Trim();
+            //        Debug.WriteLine("WM, WiFiAdvertiser::getSSID, ssid = " + ssid);
+            //    }
+            //    else
+            //    {
+            //        Debug.WriteLine("WM, WiFiAdvertiser::getSSID, ssid is empty");
+            //    }
+            //}
+            //else
+            //{
+            //    Debug.WriteLine("WM, WiFiAdvertiser::getSSID, no wlan info available");
+            //}
+            //
+            //// Clean up and return.
+            //proc.Close();
+            //proc.Dispose();
+            //Debug.WriteLine("WM, WiFiAdvertiser::getSSID, returning ssid = " + ssid);
+            //return ssid;
 
-            //Debug.WriteLine("WM, WiFiAdvertiser::getSSID, creating netsh process");
-
-            ProcessStartInfo psi = new ProcessStartInfo();
-            psi.FileName = "netsh.exe";
-            psi.UseShellExecute = false;
-            psi.RedirectStandardError = true;
-            psi.RedirectStandardOutput = true;
-            psi.CreateNoWindow = true;
-            psi.Arguments = "wlan show interfaces";
-            Process proc = Process.Start(psi);
-            proc.WaitForExit();
-
+            // Alternative approach using added lib "SimpleWifi"
             string ssid = "";
-            string sout = proc.StandardOutput.ReadToEnd();
-            string serr = proc.StandardError.ReadToEnd();
+            Wifi wifi = new Wifi();
 
-            if (proc.ExitCode != 0)
+            Debug.WriteLine("WM, WiFiAdvertiser::getSSID, connected = " + wifi.ConnectionStatus); // WM, temporary
+
+            var accessPoints = wifi.GetAccessPoints();
+
+            foreach (var accessPoint in accessPoints)
             {
-                throw new Exception(
-                    "netsh exit code: "
-                        + proc.ExitCode.ToString()
-                        + " "
-                        + (!string.IsNullOrEmpty(serr) ? " " + sout : "")
-                        + " "
-                        + (!string.IsNullOrEmpty(sout) ? " " + sout : "")
-                );
-            }
-
-            Debug.WriteLine("WM, WiFiAdvertiser::getSSID, did ReadToEnd(), now process");
-
-            if (sout != "")
-            {
-                Debug.WriteLine("WM, WiFiAdvertiser::getSSID, ProcessStartInfo = " + sout);
-                Debug.WriteLine("WM, WiFiAdvertiser::getSSID, indexing for SSID");
-                if (sout.IndexOf("SSID") != -1)
+                Debug.WriteLine("WM, WiFiAdvertiser::getSSID, SSID: " + accessPoint.Name);
+                if (accessPoint.IsConnected)
                 {
-                    ssid = sout.Substring(sout.IndexOf("SSID"));
-                    ssid = ssid.Substring(ssid.IndexOf(":"));
-                    ssid = ssid.Substring(2, ssid.IndexOf("\n")).Trim();
-                    Debug.WriteLine("WM, WiFiAdvertiser::getSSID, ssid = " + ssid);
+                    ssid = accessPoint.Name;
+                    Debug.WriteLine(
+                        "WM, WiFiAdvertiser::getSSID, Signal strength: "
+                            + accessPoint.SignalStrength
+                            + " dBm"
+                    );
+                    Debug.WriteLine(
+                        "WM, WiFiAdvertiser::getSSID, Is secured: " + accessPoint.IsSecure
+                    );
+                    Debug.WriteLine("");
+
+                    // Found the applicable network, no need to search any further.
+                    Debug.WriteLine(
+                        "WM, WiFiAdvertiser::getSSID, got what we needed, exiting loop"
+                    );
+                    break;
                 }
                 else
                 {
-                    Debug.WriteLine("WM, WiFiAdvertiser::getSSID, ssid is empty");
-                }
-
-                Debug.WriteLine("WM, WiFiAdvertiser::getSSID, indexing for Signal");
-                if (sout.IndexOf("Signal") != -1)
-                {
-                    string sig = sout.Substring(sout.IndexOf("Signal"));
-                    sig = sig.Substring(sig.IndexOf(":"));
-                    sig = sig.Substring(2, sig.IndexOf("\n")).Trim();
-                    Debug.WriteLine("WM, WiFiAdvertiser::getSSID, signal = " + sig);
-                }
-                else
-                {
-                    Debug.WriteLine("WM, WiFiAdvertiser::getSSID, signal is empty");
+                    Debug.WriteLine(
+                        "WM, WiFiAdvertiser::getSSID, SSID: " + accessPoint.Name + ", NOT CONNECTED"
+                    );
                 }
             }
-            else
-            {
-                Debug.WriteLine("WM, WiFiAdvertiser::getSSID, no wlan info available");
-            }
 
-            // Clean up and return.
-            Debug.WriteLine("WM, WiFiAdvertiser::getSSID, close and dispose...");
-            proc.Close();
-            proc.Dispose();
             Debug.WriteLine("WM, WiFiAdvertiser::getSSID, returning ssid = " + ssid);
             return ssid;
         }
