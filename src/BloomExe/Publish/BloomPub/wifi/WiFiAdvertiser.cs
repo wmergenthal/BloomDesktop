@@ -314,45 +314,57 @@ namespace Bloom.Publish.BloomPub.wifi
             //Debug.WriteLine("WM, WiFiAdvertiser::getSSID, returning ssid = " + ssid);
             //return ssid;
 
-            // Alternative approach using added lib "SimpleWifi"
-            string ssid = "";
             Wifi wifi = new Wifi();
+            string connectStatus = wifi.ConnectionStatus.ToString();
+            string ssid = null;
 
-            Debug.WriteLine("WM, WiFiAdvertiser::getSSID, connected = " + wifi.ConnectionStatus); // WM, temporary
+            Debug.WriteLine("WM, WiFiAdvertiser::getSSID, connectStatus = " + connectStatus); // WM, temporary
 
-            var accessPoints = wifi.GetAccessPoints();
-
-            foreach (var accessPoint in accessPoints)
+            // There will be an SSID to return only if we are connected to a Wi-Fi network.
+            if (connectStatus.Equals("Connected"))
             {
-                Debug.WriteLine("WM, WiFiAdvertiser::getSSID, SSID: " + accessPoint.Name);
-                if (accessPoint.IsConnected)
-                {
-                    ssid = accessPoint.Name;
-                    Debug.WriteLine(
-                        "WM, WiFiAdvertiser::getSSID, Signal strength: "
-                            + accessPoint.SignalStrength
-                            + " dBm"
-                    );
-                    Debug.WriteLine(
-                        "WM, WiFiAdvertiser::getSSID, Is secured: " + accessPoint.IsSecure
-                    );
-                    Debug.WriteLine("");
+                // Figure out which network we are connected to and grab its SSID.
+                var accessPoints = wifi.GetAccessPoints();
 
-                    // Found the applicable network, no need to search any further.
-                    Debug.WriteLine(
-                        "WM, WiFiAdvertiser::getSSID, got what we needed, exiting loop"
-                    );
-                    break;
-                }
-                else
+                foreach (var accessPoint in accessPoints)
                 {
-                    Debug.WriteLine(
-                        "WM, WiFiAdvertiser::getSSID, SSID: " + accessPoint.Name + ", NOT CONNECTED"
-                    );
+                    Debug.WriteLine("WM, WiFiAdvertiser::getSSID, SSID: " + accessPoint.Name);
+                    if (accessPoint.IsConnected)
+                    {
+                        ssid = accessPoint.Name;
+                        Debug.WriteLine(
+                            "WM, WiFiAdvertiser::getSSID, Signal strength: "
+                                + accessPoint.SignalStrength
+                                + " dBm"
+                        );
+                        Debug.WriteLine(
+                            "WM, WiFiAdvertiser::getSSID, Is secured: " + accessPoint.IsSecure
+                        );
+                        Debug.WriteLine("");
+
+                        // Found the network, no need to search any further.
+                        Debug.WriteLine(
+                            "WM, WiFiAdvertiser::getSSID, got what we needed, exiting loop"
+                        );
+                        break;
+                    }
+                    else
+                    {
+                        Debug.WriteLine(
+                            "WM, WiFiAdvertiser::getSSID, SSID: "
+                                + accessPoint.Name
+                                + ", NOT CONNECTED"
+                        );
+                    }
                 }
+            }
+            else
+            {
+                Debug.WriteLine("WM, WiFiAdvertiser::getSSID, not connected to Wi-Fi");
             }
 
             Debug.WriteLine("WM, WiFiAdvertiser::getSSID, returning ssid = " + ssid);
+            wifi = null; // saw stale data once, this can help prevent
             return ssid;
         }
 
