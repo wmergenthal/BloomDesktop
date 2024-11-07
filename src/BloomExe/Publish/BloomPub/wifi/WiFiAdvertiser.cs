@@ -11,11 +11,9 @@ using Bloom.Api;
 using Bloom.web;
 using System.Drawing.Imaging;
 using System.Net.NetworkInformation;
-using System.Management;
 using static Microsoft.WindowsAPICodePack.Shell.PropertySystem.SystemProperties.System;
 using System.Security.Cryptography;
 using SIL.Windows.Forms.Progress;
-using NuGet;
 using SimpleWifi;
 
 namespace Bloom.Publish.BloomPub.wifi
@@ -66,7 +64,7 @@ namespace Bloom.Publish.BloomPub.wifi
 
         // The QR advertising thread calls here to get a copy of the current advertising
         // string. This string will be displayed on the Bloom Desktop screen as a QR code.
-        // The UDP advert and QR code must contain the exact same data.
+        // The UDP advert and QR code contain the exact same data.
         public string ShareAdvertString()
         {
             if (advertStringIsReady == true)
@@ -165,12 +163,12 @@ namespace Bloom.Publish.BloomPub.wifi
                 // via ShareAdvertString(), is recognizably invalid.
                 advertStringIsReady = false;
 
-                Debug.WriteLine(
-                    "WM, WiFiAdvertiser::UABOCIA, update cached IP addr from "
-                        + _cachedIpAddress
-                        + " to "
-                        + _currentIpAddress
-                ); // WM, temporary
+                //Debug.WriteLine(
+                //    "WM, WiFiAdvertiser::UABOCIA, update cached IP addr from "
+                //        + _cachedIpAddress
+                //        + " to "
+                //        + _currentIpAddress
+                //); // WM, temporary
                 _cachedIpAddress = _currentIpAddress; // save snapshot of our new IP address
                 advertisement.title = BookTitle;
                 advertisement.version = BookVersion;
@@ -225,7 +223,8 @@ namespace Bloom.Publish.BloomPub.wifi
         // one that will actually be used by network interface. Unfortunately, GetLocalIpAddress() does not always
         // return the correct address.
         // BloomReaderTCPListener.ListenForTCPMessages() implements a mechanism that does. That code provides the
-        // basis for this function, and also describes how the mechanism works.
+        // basis for this function. Both are based on the post at
+        // https://stackoverflow.com/questions/6803073/get-local-ip-address/27376368#27376368
         // This function is static so that other code can use it too (I thought at first that ListenForTCPMessages()
         // could call it, but not so - it needs a more complex return type). Future code, which would be in namespace
         // 'Bloom.Publish.BloomPub.wifi', could call into here.
@@ -236,10 +235,10 @@ namespace Bloom.Publish.BloomPub.wifi
             socket.Connect("8.8.8.8", 65530); // Google's public DNS service
             endpoint = socket.LocalEndPoint as IPEndPoint;
 
-            Debug.WriteLine(
-                "WM, WiFiAdvertiser::GetIpAddressOfNetworkIface, IPv4 address = "
-                    + endpoint.Address.ToString()
-            ); // WM, temporary
+            //Debug.WriteLine(
+            //    "WM, WiFiAdvertiser::GetIpAddressOfNetworkIface, IPv4 address = "
+            //        + endpoint.Address.ToString()
+            //); // WM, temporary
             return endpoint.Address.ToString();
         }
 
@@ -247,114 +246,39 @@ namespace Bloom.Publish.BloomPub.wifi
         // connected to.
         // If we are on a wired (ethernet) connection there won't be an SSID, and we will return an
         // empty string.
+        //
+        // To keep an eye on: One time (only!) I saw a failure that looked like stale WiFi connection
+        // data had been used for detecting SSID.
+        // I was not able to replicate that problem, but I have seen issues when doing a test with
+        // a wired connection coming less than a minute or so after the same test with a wireless
+        // connection. The WiFi connection was still detected and its SSID returned, instead of the
+        // correct empty SSID. After waiting another minute or two I retried the wired case, and this
+        // time the SSID came back empty as it should.
+        // I think this likely indicates that the PC's network stacks need a fair amount of time to
+        // shift from wireless to wired. My understanding is that Bloom Desktop is almost always on
+        // on WiFi in the field. So this will be a rare scenario that does not, I think, warrant
+        // significant effort to deal with.
         private string getSSID()
         {
-            //// Based on code from:
-            ////    https://stackoverflow.com/questions/39953600/run-a-process-silently-in-background-without-any-window
-            ////    https://stackoverflow.com/questions/39346232/how-to-get-currently-connected-wifi-ssid-in-c-sharp-using-wmi-or-system-net-netw
-            //// The above works, but also has the annoying near-subliminal behavior of showing a dialog
-            //// for a fraction of a second. Setting the element 'CreateNoWindow' as true suppresses this.
-            ////
-            //// I spent too long looking for a way to do this that is lighter weight, that doesn't
-            //// require spinning up (and then down) a new process. I found some but none, yet, have worked.
-            //// Planning to look into one more: SimpleWifi.
-            //
-            //ProcessStartInfo psi = new ProcessStartInfo();
-            //psi.FileName = "netsh.exe";
-            //psi.UseShellExecute = false;
-            //psi.RedirectStandardError = true;
-            //psi.RedirectStandardOutput = true;
-            //psi.CreateNoWindow = true;
-            //psi.Arguments = "wlan show interfaces";
-            //Process proc = Process.Start(psi);
-            //proc.WaitForExit();
-            //
-            //string ssid = "";
-            //string sout = proc.StandardOutput.ReadToEnd();
-            ////string serr = proc.StandardError.ReadToEnd();
-            //
-            //if (proc.ExitCode != 0)
-            //{
-            //    throw new Exception(
-            //        "netsh exit code: "
-            //            + proc.ExitCode.ToString()
-            //            //+ " "
-            //            //+ (!string.IsNullOrEmpty(serr) ? " " + sout : "")
-            //            + " "
-            //            + (!string.IsNullOrEmpty(sout) ? " " + sout : "")
-            //    );
-            //}
-            //
-            ////Debug.WriteLine("WM, WiFiAdvertiser::getSSID, did ReadToEnd(), now process");
-            //
-            //if (sout != "")
-            //{
-            //    Debug.WriteLine("WM, WiFiAdvertiser::getSSID, ProcessStartInfo = " + sout); // WM, show all of it
-            //    Debug.WriteLine("WM, WiFiAdvertiser::getSSID, indexing for SSID");
-            //    if (sout.IndexOf("SSID") != -1)
-            //    {
-            //        ssid = sout.Substring(sout.IndexOf("SSID"));
-            //        ssid = ssid.Substring(ssid.IndexOf(":"));
-            //        ssid = ssid.Substring(2, ssid.IndexOf("\n")).Trim();
-            //        Debug.WriteLine("WM, WiFiAdvertiser::getSSID, ssid = " + ssid);
-            //    }
-            //    else
-            //    {
-            //        Debug.WriteLine("WM, WiFiAdvertiser::getSSID, ssid is empty");
-            //    }
-            //}
-            //else
-            //{
-            //    Debug.WriteLine("WM, WiFiAdvertiser::getSSID, no wlan info available");
-            //}
-            //
-            //// Clean up and return.
-            //proc.Close();
-            //proc.Dispose();
-            //Debug.WriteLine("WM, WiFiAdvertiser::getSSID, returning ssid = " + ssid);
-            //return ssid;
-
             Wifi wifi = new Wifi();
             string connectStatus = wifi.ConnectionStatus.ToString();
-            string ssid = null;
+            Debug.WriteLine("WM, WiFiAdvertiser::getSSID, Wi-Fi connect status = " + connectStatus); // WM, temporary
 
-            Debug.WriteLine("WM, WiFiAdvertiser::getSSID, connectStatus = " + connectStatus); // WM, temporary
+            string ssid = null;
 
             // There will be an SSID to return only if we are connected to a Wi-Fi network.
             if (connectStatus.Equals("Connected"))
             {
                 // Figure out which network we are connected to and grab its SSID.
                 var accessPoints = wifi.GetAccessPoints();
-
                 foreach (var accessPoint in accessPoints)
                 {
-                    Debug.WriteLine("WM, WiFiAdvertiser::getSSID, SSID: " + accessPoint.Name);
                     if (accessPoint.IsConnected)
                     {
                         ssid = accessPoint.Name;
-                        Debug.WriteLine(
-                            "WM, WiFiAdvertiser::getSSID, Signal strength: "
-                                + accessPoint.SignalStrength
-                                + " dBm"
-                        );
-                        Debug.WriteLine(
-                            "WM, WiFiAdvertiser::getSSID, Is secured: " + accessPoint.IsSecure
-                        );
-                        Debug.WriteLine("");
-
                         // Found the network, no need to search any further.
-                        Debug.WriteLine(
-                            "WM, WiFiAdvertiser::getSSID, got what we needed, exiting loop"
-                        );
+                        // PCs can't be connected to multiple Wi-Fi access points.
                         break;
-                    }
-                    else
-                    {
-                        Debug.WriteLine(
-                            "WM, WiFiAdvertiser::getSSID, SSID: "
-                                + accessPoint.Name
-                                + ", NOT CONNECTED"
-                        );
                     }
                 }
             }
@@ -363,8 +287,11 @@ namespace Bloom.Publish.BloomPub.wifi
                 Debug.WriteLine("WM, WiFiAdvertiser::getSSID, not connected to Wi-Fi");
             }
 
+            // Minimize the chances for next time using stale data.
+            // I mostly doubt this is necessary, but it doesn't hurt.
+            //wifi = null;
+
             Debug.WriteLine("WM, WiFiAdvertiser::getSSID, returning ssid = " + ssid);
-            wifi = null; // saw stale data once, this can help prevent
             return ssid;
         }
 
