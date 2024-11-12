@@ -235,10 +235,6 @@ namespace Bloom.Publish.BloomPub.wifi
             socket.Connect("8.8.8.8", 65530); // Google's public DNS service
             endpoint = socket.LocalEndPoint as IPEndPoint;
 
-            //Debug.WriteLine(
-            //    "WM, WiFiAdvertiser::GetIpAddressOfNetworkIface, IPv4 address = "
-            //        + endpoint.Address.ToString()
-            //); // WM, temporary
             return endpoint.Address.ToString();
         }
 
@@ -255,16 +251,16 @@ namespace Bloom.Publish.BloomPub.wifi
         // correct empty SSID. After waiting another minute or two I retried the wired case, and this
         // time the SSID came back empty as it should.
         // I think this likely indicates that the PC's network stacks need a fair amount of time to
-        // shift from wireless to wired. My understanding is that Bloom Desktop is almost always on
-        // on WiFi in the field. So this will be a rare scenario that does not, I think, warrant
-        // significant effort to deal with.
+        // shift from wireless to wired. My understanding is that Bloom Desktop almost always uses
+        // WiFi in the field. So this will be a rare scenario that probably doesn't warrant a lot of
+        // effort to deal with.
         private string getSSID()
         {
             Wifi wifi = new Wifi();
             string connectStatus = wifi.ConnectionStatus.ToString();
             Debug.WriteLine("WM, WiFiAdvertiser::getSSID, Wi-Fi connect status = " + connectStatus); // WM, temporary
 
-            string ssid = null;
+            string ssid = "";
 
             // There will be an SSID to return only if we are connected to a Wi-Fi network.
             if (connectStatus.Equals("Connected"))
