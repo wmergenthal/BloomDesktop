@@ -121,7 +121,7 @@ namespace Bloom.Publish.BloomPub.wifi
                             _client
                         );
 
-                        // WM, VERY TEMPORARY, to test arbitration provided by the mutex.
+                        // WM, TEMPORARY, to test arbitration provided by the mutex.
                         // Ensure that multiple Reader tablets respond to the same UDP advert by
                         // guaranteeing that only one is ever broadcast.
                         //Debug.WriteLine("WM, WiFiAdvertiser::Work, DID ONE UDP BROADCAST ADVERT, NO MORE");
@@ -163,12 +163,6 @@ namespace Bloom.Publish.BloomPub.wifi
                 // via ShareAdvertString(), is recognizably invalid.
                 advertStringIsReady = false;
 
-                //Debug.WriteLine(
-                //    "WM, WiFiAdvertiser::UABOCIA, update cached IP addr from "
-                //        + _cachedIpAddress
-                //        + " to "
-                //        + _currentIpAddress
-                //); // WM, temporary
                 _cachedIpAddress = _currentIpAddress; // save snapshot of our new IP address
                 advertisement.title = BookTitle;
                 advertisement.version = BookVersion;
@@ -251,9 +245,9 @@ namespace Bloom.Publish.BloomPub.wifi
         // correct empty SSID. After waiting another minute or two I retried the wired case, and this
         // time the SSID came back empty as it should.
         // I think this likely indicates that the PC's network stacks need a fair amount of time to
-        // shift from wireless to wired. My understanding is that Bloom Desktop almost always uses
-        // WiFi in the field. So this will be a rare scenario that probably doesn't warrant a lot of
-        // effort to deal with.
+        // shift from wireless to wired (and probably vice versa). My understanding is that Bloom Desktop
+        // almost always uses WiFi in the field, so this scenario will be rare. It probably doesn't
+        // warrant spending the time needed to fully handle, so I won't. Can revisit if necessary.
         private string getSSID()
         {
             Wifi wifi = new Wifi();
@@ -272,7 +266,7 @@ namespace Bloom.Publish.BloomPub.wifi
                     if (accessPoint.IsConnected)
                     {
                         ssid = accessPoint.Name;
-                        // Found the network, no need to search any further.
+                        // Found the network. No need to search any further since
                         // PCs can't be connected to multiple Wi-Fi access points.
                         break;
                     }
@@ -282,10 +276,6 @@ namespace Bloom.Publish.BloomPub.wifi
             {
                 Debug.WriteLine("WM, WiFiAdvertiser::getSSID, not connected to Wi-Fi");
             }
-
-            // Minimize the chances for next time using stale data.
-            // I mostly doubt this is necessary, but it doesn't hurt.
-            //wifi = null;
 
             Debug.WriteLine("WM, WiFiAdvertiser::getSSID, returning ssid = " + ssid);
             return ssid;
