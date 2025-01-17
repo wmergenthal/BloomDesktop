@@ -99,6 +99,11 @@
 		<PackageReference Include="SIL.Media" Version="15.0.0-beta0081" />
 		<PackageReference Include="SIL.TestUtilities" Version="15.0.0-beta0081" />
 		<PackageReference Include="SIL.Windows.Forms" Version="15.0.0-beta0081" />
+		<PackageReference Include="sqlite-net-pcl" Version="1.9.172" />
+		<PackageReference Include="SQLitePCLRaw.bundle_green" Version="2.1.10" />
+		<PackageReference Include="SQLitePCLRaw.core" Version="2.1.10" />
+		<PackageReference Include="SQLitePCLRaw.lib.e_sqlite3" Version="2.1.10" />
+		<PackageReference Include="SQLitePCLRaw.provider.dynamic_cdecl" Version="2.1.10" />
 		<PackageReference Include="System.Drawing.Common" Version="6.0.0" />
 		<PackageReference Include="PolySharp" Version="1.13.2">
 			<PrivateAssets>all</PrivateAssets>
