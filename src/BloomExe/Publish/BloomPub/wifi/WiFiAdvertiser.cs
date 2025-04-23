@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Net;
@@ -48,7 +47,7 @@ namespace Bloom.Publish.BloomPub.wifi
 
         // Layout of a row in the IPv4 routing table.
         [StructLayout(LayoutKind.Sequential)]
-        public struct MIB_IPFORWARDROW              // MAKE EVERYTHING PRIVATE?
+        public struct MIB_IPFORWARDROW
         {
             public uint dwForwardDest;
             public uint dwForwardMask;
@@ -69,10 +68,10 @@ namespace Bloom.Publish.BloomPub.wifi
         // Holds a copy of the IPv4 routing table, which we will examine
         // to find which row/route has the lowest "interface metric".
         [StructLayout(LayoutKind.Sequential)]
-        public struct MIB_IPFORWARDTABLE            // MAKE EVERYTHING PRIVATE?
+        private struct MIB_IPFORWARDTABLE
         {
-            public int dwNumEntries;
-            public MIB_IPFORWARDROW table;
+            private int dwNumEntries;
+            private MIB_IPFORWARDROW table;
         }
 
         // We use an unmanaged function in the C/C++ DLL "iphlpapi.dll".
@@ -82,7 +81,7 @@ namespace Bloom.Publish.BloomPub.wifi
         static extern int GetIpForwardTable(IntPtr pIpForwardTable, ref int pdwSize, bool bOrder);
 
         // Holds relevant network interface attributes.
-        public class InterfaceInfo                  // MAKE EVERYTHING PRIVATE?
+        private class InterfaceInfo                  // MAKE EVERYTHING PRIVATE?
         {
             public string IpAddr    { get; set; }
             public string NetMask   { get; set; }
@@ -91,13 +90,9 @@ namespace Bloom.Publish.BloomPub.wifi
         }
 
         // Holds the current network interface candidate. After all interfaces are
-        // checked this will hold the one with the lowest "interface metric", which
-        // is the one that Windows will choose for UDP advertising.
+        // checked this will hold the one having the lowest interface metric (the
+        // "winner") which is the one Windows will choose for UDP advertising.
         InterfaceInfo IfaceWinner = new InterfaceInfo();
-
-        // Lists to hold useful information pulled from all network interfaces.
-        //private List<string> IfIpAddresses = new List<string>();    // NEED THIS?
-        //private List<string> IfNetmasks = new List<string>();       // NEED THIS?
 
         // The port on which we advertise.
         // ChorusHub uses 5911 to advertise. Bloom looks for a port for its server at 8089 and 10 following ports.
@@ -127,20 +122,21 @@ namespace Bloom.Publish.BloomPub.wifi
                 message: "Advertising book to Bloom Readers on local network..."
             );
 
-            // Don't let the network interface get chosen by default per a UdpClient -- the wrong
-            // one is sometimes chosen. Instead of a UdpClient use a Socket, and assign it the IP
-            // address of the network interface having the lowest "interface metric."
+            // We must be confident that the local IP address we advertise in the UDP broadcast
+            // packet is the same one the network stack will use for the broadcast. Gleaning the
+            // local IP address from a UdpClient usually is the correct one, but unfortunately it
+            // can be different on some machines. When that happens the remote Android gets the
+            // wrong address from the advert, and Desktop never hears the Android book request.
+            // 
+            // To mitigate: instead of a UdpClient, use a Socket and assign it the IP address of
+            // the network interface having the lowest "interface metric."
             //
-            //   NOTE: only a multi-homed machine will have more than one network interface
-            //         supporting internet connectivity. This will not be common -- the typical
-            //         BloomDesktop user is on Windows and has just one active network interface,
-            //         likely Wi-Fi but could also be Ethernet.
-            // ASSUME: the machine is single-homed. If this assumption proves to be wrong we can
-            //         revisit and augment the interface selection process.
+            // NOTE: the typical BloomDesktop user is on Windows and is probably using Wi-Fi, but
+            // Ethernet works equally well.
 
-            // Do a survey of all network interfaces. Skip the inactive ones. For those that are
-            // active find the one with the lowest interface metric. The "winner" will be noted in
-            // the 'IfaceWinner' object along with the pieces of information needed for advertising. 
+            // First, do a survey of all network interfaces. Skip the inactive ones. For those that
+            // are active find the one with the lowest interface metric, saving the lowest-so-far
+            // in the 'IfaceWinner' object plus associated attributes needed for UDP advertising. 
             GetInterfaceStackWillUse();
             _localIp = IfaceWinner.IpAddr;
             if (_localIp.Length == 0)
@@ -149,9 +145,9 @@ namespace Bloom.Publish.BloomPub.wifi
                 return;
             }
 
-            // The local IP address is associated with one of the network interfaces. From that
-            // same interface get the associated subnet mask (this will be needed to generate the
-            // appropriate broadcast address for UDP advertising).
+            // The local IP address is bound to one of the network interfaces. From that same
+            // interface get the associated subnet mask. This will be needed to calculate the
+            // appropriate broadcast address for UDP advertising.
             _subnetMask = IfaceWinner.NetMask;
             if (_subnetMask.Length == 0)
             {
@@ -163,7 +159,7 @@ namespace Bloom.Publish.BloomPub.wifi
             //      "System.Net.Sockets.SocketException (0x80004005): An attempt was made
             //      to access a socket in a way forbidden by its access permissions"
             // Rather, the broadcast address must be calculated from the local IP address and
-            // the subnet mask.
+            // subnet mask.
             _remoteIp = CalculateBroadcastAddress(_localIp, _subnetMask);
             if (_remoteIp.Length == 0)
             {
@@ -171,29 +167,30 @@ namespace Bloom.Publish.BloomPub.wifi
                 return;
             }
 
-            Debug.WriteLine("WiFiAdvertiser, UDP advertising will use: _localIp    = " + _localIp);
-            Debug.WriteLine("                                          _subnetMask = " + _subnetMask);
-            Debug.WriteLine("                                          _remoteIp   = " + _remoteIp);
+            // Log these key values for tech support.
+            Debug.WriteLine("UDP advertising will use: _localIp    = " + _localIp + " (" + IfaceWinner.Type + ")");
+            Debug.WriteLine("                          _subnetMask = " + _subnetMask);
+            Debug.WriteLine("                          _remoteIp   = " + _remoteIp);
 
             try
             {
-                _localEP = new IPEndPoint(IPAddress.Parse(_localIp), Port);
-
+                // Set up destination endpoint.
                 _remoteEP = new IPEndPoint(IPAddress.Parse(_remoteIp), Port);
 
+                // Set up local socket and assign its IP address.
+                _localEP = new IPEndPoint(IPAddress.Parse(_localIp), Port);
                 _sock = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
-
                 _sock.Bind(_localEP);
 
-                // Socket is ready. Begin advertising once per second, indefinitely.
+                // Local and remote are ready. Advertise once per second, indefinitely.
                 while (true)
                 {
                     if (!Paused)
                     {
                         UpdateAdvertisementBasedOnCurrentIpAddress();
 
-                        // No need to transmit on a separate thread; this thread spends most of its time
-                        // sleeping. This is a simple socket and we are sending only a few hundred bytes.
+                        // No need to transmit on a separate thread. Just use this one -- it spends
+                        // most of its time sleeping, and we are sending only a few hundred bytes.
                         _sock.SendTo(_sendBytes, 0, _sendBytes.Length, SocketFlags.None, _remoteEP);
                     }
                     Thread.Sleep(1000);
@@ -207,7 +204,6 @@ namespace Bloom.Publish.BloomPub.wifi
             catch (ThreadAbortException)
             {
                 _progress.Message(idSuffix: "Stopped", message: "Stopped Advertising.");
-                //_client.Close();
             }
             catch (Exception error)
             {
@@ -239,27 +235,26 @@ namespace Bloom.Publish.BloomPub.wifi
                 advertisement.protocolVersion = WiFiPublisher.ProtocolVersion;
                 advertisement.sender = System.Environment.MachineName;
 
-                // If we do eventually add the capability to display the advert as a QR code,
+                // If we do eventually add capability to display the advert as a QR code,
                 // the local IP address will need to be included. Might as well add it now.
                 advertisement.senderIP = _currentIpAddress;
 
                 _sendBytes = Encoding.UTF8.GetBytes(advertisement.ToString());
-                Debug.WriteLine("UDP advertising will have: source addr    = " + _currentIpAddress); // TEMPORARY
                 //EventLog.WriteEntry("Application", "Serving at http://" + _currentIpAddress + ":" + ChorusHubOptions.MercurialPort, EventLogEntryType.Information);
             }
         }
 
         // Examine all network interfaces. For each *active* one, check each of its
-        // IP addresses. Ignore the IPv6 addresses and record interface information
+        // IP addresses. Ignore the IPv6 addresses and record key interface info
         // for each IPv4 address:
-        //   a. type (wired or WiFi) -- not essential but log it for tech support
-        //   b. IP address
-        //   c. subnet mask
-        //   d. interface metric
+        //    a. IP address
+        //    b. subnet mask
+        //    c. interface metric
+        //    d. type (wired or WiFi) -- not essential but log it for tech support
         // The goal is to find the address having the lowest metric. For each
         // address compare its metric to the lowest so far (saved in the result
         // struct 'IfaceWinner'). If the one being checked has a new lowest-so-far
-        // metric, save it (and its associated IP address, subnet mask, and type)
+        // metric, save it (plus the associated IP address, subnet mask, and type)
         // in the result struct. After all interfaces have been checked the lowest
         // metric, along with IP addr/mask/type, will be in 'IfaceWinner'.
         //
@@ -303,10 +298,10 @@ namespace Bloom.Publish.BloomPub.wifi
                         // so far, save it and its relevant associated values.
                         if (currentIfaceMetric < IfaceWinner.Metric)
                         {
-                            IfaceWinner.IpAddr = ip.Address.ToString();
+                            IfaceWinner.IpAddr  = ip.Address.ToString();
                             IfaceWinner.NetMask = ip.IPv4Mask.ToString();
-                            IfaceWinner.Type = ni.NetworkInterfaceType.ToString();
-                            IfaceWinner.Metric = currentIfaceMetric;
+                            IfaceWinner.Type    = ni.NetworkInterfaceType.ToString();
+                            IfaceWinner.Metric  = currentIfaceMetric;
                         }
                     }
                 }
@@ -314,13 +309,12 @@ namespace Bloom.Publish.BloomPub.wifi
         }
 
         // Get a key piece of info ("metric") from the specified network interface.
-        // Based on ChatGPT and:
         // https://learn.microsoft.com/en-us/windows/win32/api/iphlpapi/nf-iphlpapi-getipforwardtable
         //
-        // Retrieving the metric is, unfortunately, not as simple as grabbing one of
-        // the fields in the network interface. The metric resides in the network
-        // stack routing table. One of the interface fields ("Index") is also in the
-        // routing table and is how we correlate the two.
+        // Retrieving the metric is not as simple as grabbing one of the fields in
+        // the network interface. The metric resides in the network stack routing
+        // table. One of the interface fields ("Index") is also in the routing table
+        // and is how we correlate the two.
         //   - Calling code (walking the interface collection) passes in the index
         //     of the interface whose "best" metric it wants.
         //   - This function walks the routing table looking for all rows (each of
@@ -341,17 +335,18 @@ namespace Bloom.Publish.BloomPub.wifi
 
             try
             {
-                // Copy the routing table into buffer for examination. If the result
-                // is not 0 then something went wrong.
+                // Copy the routing table into buffer for examination.
+                // If the result code is not 0 then something went wrong.
                 int error = GetIpForwardTable(tableBuf, ref size, false);
                 if (error != 0)
                 {
-                    // Note: it is tempting to add a dealloc call here, but don't.
-                    // The dealloc in the finally-block *will* be done (I tried it).
+                    // It is tempting to add a dealloc call here before bailing, but
+                    // don't. The dealloc in the finally-block *will* be done (I checked).
                     Console.WriteLine("  GetMetricForInterface, ERROR, GetIpForwardTable() = {0}, returning {1}", error, int.MaxValue);
                     return int.MaxValue;
                 }
 
+                // Get number of routing table entries.
                 int numEntries = Marshal.ReadInt32(tableBuf);
 
                 // Advance pointer past the integer to point at 1st row.
@@ -383,8 +378,8 @@ namespace Bloom.Publish.BloomPub.wifi
             return bestMetric;
         }
 
-        // Function: for a given local IP address and subnet mask, construct the
-        //     appropriate broadcast address.
+        // For a given local IP address and subnet mask, construct the appropriate
+        // broadcast address.
         //
         // Philosophy: the subnet mask indicates how to handle the IP address bits --
         //     - '1' mask bits indicate the "network address" portion of the IP address.
@@ -396,7 +391,7 @@ namespace Bloom.Publish.BloomPub.wifi
         //       to fill this portion of the broadcast address with '1's so all hosts on
         //       the network will see the transmission. The same operations work here
         //       too: 'XORing' the '0' mask bits with '1' flips them to '1', which when
-        //       'ORed' with anything gives '1' which is what we want for the host bits.
+        //       'ORed' with anything gives '1', which is what we want for the host bits.
         //
         // Algorithm:
         //     convert IP address and corresponding subnet mask to byte arrays
@@ -420,27 +415,21 @@ namespace Bloom.Publish.BloomPub.wifi
 
                 if (ipBytes.Length != subnetBytes.Length)
                 {
-                    throw new ArgumentException("IP address and subnet mask length mismatch.");
+                    Console.WriteLine("CalculateBroadcastAddress, ERROR, length mismatch, IP vs mask: {0}, {1}",
+                        ipBytes.Length, subnetBytes.Length);
                 }
 
                 byte[] bcastBytes = new byte[ipBytes.Length];
                 for (int i = 0; i < ipBytes.Length; i++)
                 {
-                    //Console.WriteLine("  ipBytes[{0}]={1}, subnetBytes[{2}]={3}, subnetBytes[{4}]^255={5}",
-                    //                     i, ipBytes[i], i, subnetBytes[i], i, subnetBytes[i]^255);
-
                     bcastBytes[i] = (byte)(ipBytes[i] | (subnetBytes[i] ^ 255));
-
-                    // TEMPORARY DEBUG; either way works
-                    //Console.WriteLine("  result = {0}.{1}.{2}.{3}", (byte)bcastBytes[0], (byte)bcastBytes[1],
-                    //                                                (byte)bcastBytes[2], (byte)bcastBytes[3]);
-                    //Console.WriteLine("  result = " + String.Join(" ", bcastBytes));
                 }
                 return new IPAddress(bcastBytes).ToString();
             }
             catch (Exception)
             {
-                return "Invalid IP address or subnet mask";
+                // Invalid IP address or subnet mask.
+                return "";
             }
         }
 
