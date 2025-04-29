@@ -7,8 +7,10 @@ using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
+using System.Windows.Forms;
 using Bloom.Api;
 using Bloom.web;
+using L10NSharp;
 using SIL.Progress;
 
 namespace Bloom.Publish.BloomPub.wifi
@@ -81,18 +83,27 @@ namespace Bloom.Publish.BloomPub.wifi
         static extern int GetIpForwardTable(IntPtr pIpForwardTable, ref int pdwSize, bool bOrder);
 
         // Holds relevant network interface attributes.
-        private class InterfaceInfo                  // MAKE EVERYTHING PRIVATE?
+        private class InterfaceInfo
         {
-            public string IpAddr    { get; set; }
-            public string NetMask   { get; set; }
-            public string Type      { get; set; }
-            public int Metric       { get; set; }
+            public string IpAddr      { get; set; }
+            public string Type        { get; set; }     // CAN THIS BE REMOVED?
+            public string Description { get; set; }
+            public string NetMask     { get; set; }
+            public int Metric         { get; set; }
         }
 
-        // Holds the current network interface candidate. After all interfaces are
-        // checked this will hold the one having the lowest interface metric (the
-        // "winner") which is the one Windows will choose for UDP advertising.
-        InterfaceInfo IfaceWinner = new InterfaceInfo();
+        // Hold the current network interface candidates, one for Wi-Fi and one
+        // for Ethernet.
+        private InterfaceInfo IfaceWifi = new InterfaceInfo();
+        private InterfaceInfo IfaceEthernet = new InterfaceInfo();
+
+        // Possible results from network interface assessment.
+        enum CommTypeToExpect
+        {
+            None = 0,
+            WiFi = 1,
+            Ethernet = 2
+        }
 
         // The port on which we advertise.
         // ChorusHub uses 5911 to advertise. Bloom looks for a port for its server at 8089 and 10 following ports.
@@ -128,31 +139,41 @@ namespace Bloom.Publish.BloomPub.wifi
             // can be different on some machines. When that happens the remote Android gets the
             // wrong address from the advert, and Desktop never hears the Android book request.
             // 
-            // To mitigate: instead of a UdpClient, use a Socket and assign it the IP address of
-            // the network interface having the lowest "interface metric."
+            // To mitigate: instead of a UdpClient, use a Socket and assign it the IP address
+            // of the network interface having the lowest "interface metric," the interface the
+            // stack will use.
             //
-            // NOTE: the typical BloomDesktop user is on Windows and is probably using Wi-Fi, but
-            // Ethernet works equally well.
+            // The PC on which this runs likely has both WiFi and Ethernet. They can both work,
+            // but preference is given to WiFi. The reason: although this PC can likely go either
+            // way, the Android device only has WiFi. For the book transfer to work both the PC
+            // and the Android must be on the same subnet. If the PC is using Ethernet it may not
+            // be on the same subnet as WiFi, especially on larger networks. The chances that both
+            // PC and Android are on the same subnet are greatest if both are using WiFi.
 
-            // First, do a survey of all network interfaces. Skip the inactive ones. For those that
-            // are active find the one with the lowest interface metric, saving the lowest-so-far
-            // in the 'IfaceWinner' object plus associated attributes needed for UDP advertising. 
-            GetInterfaceStackWillUse();
-            _localIp = IfaceWinner.IpAddr;
-            if (_localIp.Length == 0)
+            // Determine which interface the network stack will use.
+            CommTypeToExpect ifcResult = GetInterfaceStackWillUse();
+
+            if (ifcResult == CommTypeToExpect.None)
             {
-                Debug.WriteLine("WiFiAdvertiser, ERROR: can't get local IP address, exiting");
+                Debug.WriteLine("WiFiAdvertiser, local IP not found");
                 return;
             }
 
-            // The local IP address is bound to one of the network interfaces. From that same
-            // interface get the associated subnet mask. This will be needed to calculate the
-            // appropriate broadcast address for UDP advertising.
-            _subnetMask = IfaceWinner.NetMask;
-            if (_subnetMask.Length == 0)
+            string ifaceDesc = "";
+
+            if (ifcResult == CommTypeToExpect.WiFi)
             {
-                Debug.WriteLine("WiFiAdvertiser, ERROR: can't get subnet mask, exiting");
-                return;
+                _localIp = IfaceWifi.IpAddr;
+                _subnetMask = IfaceWifi.NetMask;
+                ifaceDesc = IfaceWifi.Description;
+                Debug.WriteLine("WiFiAdvertiser, local IP = {0} ({1})", _localIp, ifaceDesc); // TEMPORARY
+            }
+            else
+            {
+                _localIp = IfaceEthernet.IpAddr;
+                _subnetMask = IfaceEthernet.NetMask;
+                ifaceDesc = IfaceEthernet.Description;
+                Debug.WriteLine("WiFiAdvertiser, local IP = {0} ({1})", _localIp, ifaceDesc); // TEMPORARY
             }
 
             // The typical broadcast address (255.255.255.255) doesn't work with a raw socket:
@@ -168,7 +189,7 @@ namespace Bloom.Publish.BloomPub.wifi
             }
 
             // Log these key values for tech support.
-            Debug.WriteLine("UDP advertising will use: _localIp    = " + _localIp + " (" + IfaceWinner.Type + ")");
+            Debug.WriteLine("UDP advertising will use: _localIp    = " + _localIp + " (" + ifaceDesc + ")");
             Debug.WriteLine("                          _subnetMask = " + _subnetMask);
             Debug.WriteLine("                          _remoteIp   = " + _remoteIp);
 
@@ -244,37 +265,37 @@ namespace Bloom.Publish.BloomPub.wifi
             }
         }
 
-        // Examine all network interfaces. For each *active* one, check each of its
-        // IP addresses. Ignore the IPv6 addresses and record key interface info
-        // for each IPv4 address:
-        //    a. IP address
-        //    b. subnet mask
-        //    c. interface metric
-        //    d. type (wired or WiFi) -- not essential but log it for tech support
-        // The goal is to find the address having the lowest metric. For each
-        // address compare its metric to the lowest so far (saved in the result
-        // struct 'IfaceWinner'). If the one being checked has a new lowest-so-far
-        // metric, save it (plus the associated IP address, subnet mask, and type)
-        // in the result struct. After all interfaces have been checked the lowest
-        // metric, along with IP addr/mask/type, will be in 'IfaceWinner'.
+        // Survey the network interfaces and determine which one, if any, the network
+        // stack will use for network traffic.
+        //   - During the assessment the current leading WiFi candidate will be held in
+        //     'IfaceWifi', and similarly the current best candidate for Ethernet will
+        //     be in 'IfaceEthernet'.
+        //   - After assessment inform calling code of the winner by returning an enum
+        //     indicating which of the candidate structs to draw from: WiFi, Ethernet,
+        //     or neither.
         //
-        void GetInterfaceStackWillUse()
+        private CommTypeToExpect GetInterfaceStackWillUse()
         {
             int currentIfaceMetric;
 
-            // Initialize result struct's metric field to the highest possible value
+            // Initialize result structs metric field to the highest possible value
             // so the first interface metric value seen will always replace it.
-            IfaceWinner.Metric = int.MaxValue;
+            IfaceWifi.Metric = int.MaxValue;
+            IfaceEthernet.Metric = int.MaxValue;
 
-            // Get key attributes of *active* network interfaces.
-            foreach (NetworkInterface ni in NetworkInterface.GetAllNetworkInterfaces())
+            // Retrieve all network interfaces that are *active*.
+            var allOperationalNetworks = NetworkInterface.GetAllNetworkInterfaces()
+                .Where(ni => ni.OperationalStatus == OperationalStatus.Up).ToArray();
+
+            if (!allOperationalNetworks.Any())
             {
-                // If this interface is not active, skip it.
-                if (ni.OperationalStatus == OperationalStatus.Down)
-                {
-                    continue;
-                }
+                Debug.WriteLine("WiFiAdvertiser, ERROR, no network interfaces are operational");
+                return CommTypeToExpect.None;
+            }
 
+            // Get key attributes of active network interfaces.
+            foreach (NetworkInterface ni in allOperationalNetworks)
+            {
                 // If we can't get IP or IPv4 properties for this interface, skip it.
                 var ipProps = ni.GetIPProperties();
                 if (ipProps == null)
@@ -287,25 +308,69 @@ namespace Bloom.Publish.BloomPub.wifi
                     continue;
                 }
 
+                Debug.WriteLine("WiFiAdvertiser, checking IP addresses in " + ni.Name);  // TEMPORARY
                 foreach (UnicastIPAddressInformation ip in ipProps.UnicastAddresses)
                 {
-                    // We don't consider IPv6 so filter for IPv4 ('InterNetwork')
+                    // We don't consider IPv6 so filter for IPv4 ('InterNetwork')...
                     if (ip.Address.AddressFamily == AddressFamily.InterNetwork)
                     {
-                        currentIfaceMetric = GetMetricForInterface(ipv4Props.Index);
-
-                        // If this interface's metric is lower than what we've seen
-                        // so far, save it and its relevant associated values.
-                        if (currentIfaceMetric < IfaceWinner.Metric)
+                        // ...And of these we care only about WiFi and Ethernet.
+                        if (ni.NetworkInterfaceType == NetworkInterfaceType.Wireless80211)
                         {
-                            IfaceWinner.IpAddr  = ip.Address.ToString();
-                            IfaceWinner.NetMask = ip.IPv4Mask.ToString();
-                            IfaceWinner.Type    = ni.NetworkInterfaceType.ToString();
-                            IfaceWinner.Metric  = currentIfaceMetric;
+                            Debug.WriteLine("  WiFi...");  // TEMPORARY
+                            currentIfaceMetric = GetMetricForInterface(ipv4Props.Index);
+
+                            // Save this interface if its metric is lowest we've seen so far.
+                            if (currentIfaceMetric < IfaceWifi.Metric)
+                            {
+                                Debug.WriteLine("  updating WiFi metric to " + currentIfaceMetric);  // TEMPORARY
+                                IfaceWifi.IpAddr = ip.Address.ToString();
+                                //IfaceWifi.Type = ni.NetworkInterfaceType.ToString();
+                                IfaceWifi.Description = ni.Description;
+                                IfaceWifi.Metric = currentIfaceMetric;
+                            }
+                        }
+                        else if (ni.NetworkInterfaceType == NetworkInterfaceType.Ethernet)
+                        {
+                            Debug.WriteLine("  Ethernet...");  // TEMPORARY
+                            currentIfaceMetric = GetMetricForInterface(ipv4Props.Index);
+
+                            // Save this interface if its metric is lowest we've seen so far.
+                            if (currentIfaceMetric < IfaceEthernet.Metric)
+                            {
+                                Debug.WriteLine("  updating Ethernet metric to " + currentIfaceMetric);  // TEMPORARY
+                                IfaceEthernet.IpAddr = ip.Address.ToString();
+                                //IfaceEthernet.Type = ni.NetworkInterfaceType.ToString();
+                                IfaceEthernet.Description = ni.Description;
+                                IfaceEthernet.Metric = currentIfaceMetric;
+                            }
                         }
                     }
                 }
             }
+
+            // Active network interfaces have all been assessed.
+            //   - The WiFi interface having the lowest metric has been saved in the
+            //     WiFi result struct. Note: if no active WiFi interface was seen then
+            //     the result struct's metric field will still have its initial value.
+            //   - Likewise for Ethernet.
+            // Now choose the winner, if there is one:
+            //   - If we saw an active WiFi interface, return that
+            //   - Else if we saw an active Ethernet interface, return that
+            //   - Else there is no winner so return none
+            if (IfaceWifi.Metric < int.MaxValue)
+            {
+                Debug.WriteLine("WiFi wins, interface = " + IfaceWifi.Description);  // TEMPORARY
+                return CommTypeToExpect.WiFi;
+            }
+            if (IfaceEthernet.Metric < int.MaxValue)
+            {
+                Debug.WriteLine("Ethernet wins, interface = " + IfaceEthernet.Description);  // TEMPORARY
+                return CommTypeToExpect.Ethernet;
+            }
+
+            Debug.WriteLine("No winner, returning none");  // TEMPORARY
+            return CommTypeToExpect.None;
         }
 
         // Get a key piece of info ("metric") from the specified network interface.
