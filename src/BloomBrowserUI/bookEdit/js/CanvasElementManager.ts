@@ -107,17 +107,22 @@ export class CanvasElementManager {
     // adjust the size of the canvas element to fit it.
     // (We also call editable.scrollTop = 0 to make sure the whole content shows now there
     // is room for it all.)
-    // Returns true if successful; it will currently fail if editable is not
-    // inside a valid canvas element or if the canvas element can't grow this much while
-    // remaining inside the bloom-canvas. If it returns false, it makes no changes at all.
+    // Returns 0 if totally successful, with the editable adjusted to the desired height; if nothing can be
+    // done, it will return the input overflowY value.
+    // If doNotShrink is true and overflowY is negative, it will not shrink the editable and will return the
+    // original overflowY value.
+    // If growAsMuchAsPossible is false, and there is not enough room to grow the editable, it will return the
+    // original overflowY value without changing the box.  If growAsMuchAsPossible is true, it will grow
+    // the editable as much as possible and return the amount of positive overflow that remains.  See BL-14632.
     public adjustSizeOfContainingCanvasElementToMatchContent(
         editable: HTMLElement,
         overflowY: number,
-        doNotShrink?: boolean
-    ): boolean {
+        doNotShrink?: boolean,
+        growAsMuchAsPossible?: boolean
+    ): number {
         if (editable instanceof HTMLTextAreaElement) {
             // Calendars still use textareas, but we don't do anything with them here.
-            return false;
+            return overflowY;
         }
 
         console.assert(
@@ -132,15 +137,15 @@ export class CanvasElementManager {
             !canvasElement ||
             canvasElement.classList.contains("bloom-noAutoHeight")
         ) {
-            return false; // we can't fix it
+            return overflowY; // we can't fix it
         }
         if (doNotShrink && overflowY < 0) {
-            return false; // we don't want to change the box's size
+            return overflowY; // we don't want to change the box's size
         }
 
         const bloomCanvas = CanvasElementManager.getBloomCanvas(canvasElement);
         if (!bloomCanvas) {
-            return false; // paranoia; canvas element should always be in bloom-canvas
+            return overflowY; // paranoia; canvas element should always be in bloom-canvas
         }
 
         // The +4 is based on experiment. It may relate to a couple of 'fudge factors'
@@ -161,7 +166,7 @@ export class CanvasElementManager {
             newHeight < canvasElement.clientHeight &&
             newHeight > canvasElement.clientHeight - 4
         ) {
-            return false; // near enough, avoid jitter making it a tiny bit smaller.
+            return overflowY; // near enough, avoid jitter making it a tiny bit smaller.
         }
         if (
             newHeight < canvasElement.clientHeight &&
@@ -169,7 +174,7 @@ export class CanvasElementManager {
         ) {
             // Shrinking might cause other boxes in the group to overflow.
             // for now we just don't do it.
-            return false;
+            return overflowY;
         }
 
         // If a lot of text is pasted, the bloom-canvas will scroll down.
@@ -181,10 +186,12 @@ export class CanvasElementManager {
 
         // Check if required height exceeds available height
         if (newHeight + canvasElement.offsetTop > bloomCanvas.clientHeight) {
-            // ENHANCE: Would be nice if this set the height up to the max
-            //          But it probably requires some changes to what the return value represents and how the caller should deal.
-            //          Maybe we should return an adjusted overflowY instead of a boolean.
-            return false;
+            if (growAsMuchAsPossible) {
+                // If we are allowed to grow as much as possible, we can set the height to the max available height.
+                newHeight = bloomCanvas.clientHeight - canvasElement.offsetTop;
+            } else {
+                return overflowY;
+            }
         }
 
         canvasElement.style.height = newHeight + "px";
@@ -196,7 +203,7 @@ export class CanvasElementManager {
         );
         this.adjustTarget(canvasElement);
         this.alignControlFrameWithActiveElement();
-        return true;
+        return 0; // success; we fixed it
     }
 
     private getMaxVisibleSiblingHeight(
@@ -258,14 +265,10 @@ export class CanvasElementManager {
             this.activeElement.offsetHeight;
 
         // This mimics the relevant part of OverflowChecker.MarkOverflowInternal
-        if (
-            theOneCanvasElementManager.adjustSizeOfContainingCanvasElementToMatchContent(
-                editable,
-                overflowY
-            )
-        ) {
-            overflowY = 0;
-        }
+        overflowY = theOneCanvasElementManager.adjustSizeOfContainingCanvasElementToMatchContent(
+            editable,
+            overflowY
+        );
         editable.classList.toggle("overflow", overflowY > 0);
     }
 
@@ -3627,6 +3630,10 @@ export class CanvasElementManager {
             // Game in play mode...no edit mode functionality is relevant
             return true;
         }
+        if (targetElement.classList.contains("changeImageButton")) {
+            // The change image button should handle the mouse event itself.  See BL-14614.
+            return true;
+        }
         if (targetElement.classList.contains("bloom-dragHandle")) {
             // The drag handle is outside the canvas element, so dragging it with the mouse
             // events we handle doesn't work. Returning true lets its own event handler
@@ -4491,7 +4498,7 @@ export class CanvasElementManager {
 
     private addVideoCanvasElement(
         location: Point,
-        imageContainerJQuery: JQuery,
+        bloomCanvasJQuery: JQuery,
         rightTopOffset?: string
     ): HTMLElement {
         const standardVideoClasses =
@@ -4500,7 +4507,7 @@ export class CanvasElementManager {
         const videoContainerHtml =
             "<div class='" + standardVideoClasses + "' tabindex='0'></div>";
         return this.finishAddingCanvasElement(
-            imageContainerJQuery,
+            bloomCanvasJQuery,
             videoContainerHtml,
             location,
             "none",
@@ -4511,7 +4518,7 @@ export class CanvasElementManager {
 
     private addPictureCanvasElement(
         location: Point,
-        imageContainerJQuery: JQuery,
+        bloomCanvasJQuery: JQuery,
         rightTopOffset?: string
     ): HTMLElement {
         const standardImageClasses =
@@ -4525,7 +4532,7 @@ export class CanvasElementManager {
             imagePlaceHolderHtml +
             "</div>";
         return this.finishAddingCanvasElement(
-            imageContainerJQuery,
+            bloomCanvasJQuery,
             imageContainerHtml,
             location,
             "none",
@@ -4536,7 +4543,7 @@ export class CanvasElementManager {
 
     private addSoundCanvasElement(
         location: Point,
-        imageContainerJQuery: JQuery,
+        bloomCanvasJQuery: JQuery,
         rightTopOffset?: string
     ): HTMLElement {
         const standardImageClasses =
@@ -4567,7 +4574,7 @@ export class CanvasElementManager {
     </svg>
 </div>`;
         return this.finishAddingCanvasElement(
-            imageContainerJQuery,
+            bloomCanvasJQuery,
             html,
             location,
             "none",
@@ -4631,8 +4638,8 @@ export class CanvasElementManager {
         rightTopOffset?: string
     ): HTMLElement {
         // add canvas element as last child of .bloom-canvas (BL-7883)
-        const lastContainerChild = bloomCanvasJQuery.children().last();
-        const wrapperHtml =
+        const lastChildOfBloomCanvas = bloomCanvasJQuery.children().last();
+        const canvasElementHtml =
             "<div class='" +
             kCanvasElementClass +
             "'>" +
@@ -4642,11 +4649,13 @@ export class CanvasElementManager {
         // since that's all that keeps it on top of the image. We're deliberately not
         // using z-index so that the bloom-canvas is not a stacking context so we
         // can use z-index on the buttons inside it to put them above the comicaljs canvas.
-        const wrapperJQuery = $(wrapperHtml).insertAfter(lastContainerChild);
-        this.setDefaultWrapperBoxHeight(wrapperJQuery);
-        const contentElement = wrapperJQuery.get(0);
+        const canvasElementJQuery = $(canvasElementHtml).insertAfter(
+            lastChildOfBloomCanvas
+        );
+        const canvasElement = canvasElementJQuery.get(0);
+        this.setDefaultHeightFromWidth(canvasElement);
         this.placeElementAtPosition(
-            wrapperJQuery,
+            canvasElementJQuery,
             bloomCanvasJQuery.get(0),
             location,
             rightTopOffset
@@ -4662,13 +4671,13 @@ export class CanvasElementManager {
         // from being called, but that doesn't really matter since calling it does no good.
         // See https://issues.bloomlibrary.org/youtrack/issue/BL-11620.
         if (setElementActive) {
-            this.activeElement = contentElement;
+            this.activeElement = canvasElement;
             this.doNotifyChange();
-            this.showCorrespondingTextBox(contentElement);
+            this.showCorrespondingTextBox(canvasElement);
         }
-        const bubble = new Bubble(contentElement);
+        const bubble = new Bubble(canvasElement);
         const bubbleSpec: BubbleSpec = Bubble.getDefaultBubbleSpec(
-            contentElement,
+            canvasElement,
             comicalBubbleStyle || "speech"
         );
         bubble.setBubbleSpec(bubbleSpec);
@@ -4677,29 +4686,29 @@ export class CanvasElementManager {
         // (before we refreshBubbleEditing, since we may change some canvas elements here.)
         this.handleResizeAdjustments();
         this.refreshCanvasElementEditing(bloomCanvas, bubble, true, true);
-        const editable = contentElement.getElementsByClassName(
+        const editable = canvasElement.getElementsByClassName(
             "bloom-editable bloom-visibility-code-on"
         )[0] as HTMLElement;
         editable?.focus();
-        return contentElement;
+        return canvasElement;
     }
 
-    // This 'wrapperBox' param has just been added to the DOM by JQuery before arriving here.
     // All of the text-based canvas elements' default heights are based on the min-height of 30px set
-    // in overlayTool.less for a .bloom-canvas-element element. For video or picture over pictures,
-    // we want something a bit taller.
-    private setDefaultWrapperBoxHeight(wrapperBox: JQuery) {
-        const width = parseInt(wrapperBox.css("width"), 10);
+    // in overlayTool.less for a .bloom-canvas-element. For other elements, we usually want something else.
+    public setDefaultHeightFromWidth(canvasElement: HTMLElement) {
+        const width = parseInt(getComputedStyle(canvasElement).width, 10);
+
         if (
-            wrapperBox.find(`.${kVideoContainerClass}`).length > 0 ||
-            wrapperBox.find(`.bloom-rectangle`).length > 0
+            canvasElement.querySelector(`.${kVideoContainerClass}`) !== null ||
+            canvasElement.querySelector(`.bloom-rectangle`) !== null
         ) {
             // Set the default video aspect to 4:3, the same as the sign language tool generates.
-            wrapperBox.css("height", (width * 3) / 4);
-        }
-        if (wrapperBox.find(kImageContainerSelector).length > 0) {
+            canvasElement.style.height = `${(width * 3) / 4}px`;
+        } else if (
+            canvasElement.querySelector(kImageContainerSelector) !== null
+        ) {
             // Set the default image aspect to square.
-            wrapperBox.css("height", width);
+            canvasElement.style.height = `${width}px`;
         }
     }
 
@@ -4726,7 +4735,7 @@ export class CanvasElementManager {
     // Then we position the new element so its top right is at that same point.
     // Note: I wish we could just make this adjustment in the dragEnd event handler
     // which receives both the point and the rightTopOffset data, but it does not
-    // have acess to the element being created to get its width. We could push it up
+    // have access to the element being created to get its width. We could push it up
     // one level into finishAddingCanvasElement, but it's simpler here where we're
     // already extracting and adjusting the offsets from positionInViewport
     private placeElementAtPosition(
