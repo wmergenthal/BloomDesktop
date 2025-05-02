@@ -86,7 +86,6 @@ namespace Bloom.Publish.BloomPub.wifi
         private class InterfaceInfo
         {
             public string IpAddr      { get; set; }
-            public string Type        { get; set; }     // CAN THIS BE REMOVED?
             public string Description { get; set; }
             public string NetMask     { get; set; }
             public int Metric         { get; set; }
@@ -98,7 +97,7 @@ namespace Bloom.Publish.BloomPub.wifi
         private InterfaceInfo IfaceEthernet = new InterfaceInfo();
 
         // Possible results from network interface assessment.
-        enum CommTypeToExpect
+        private enum CommTypeToExpect
         {
             None = 0,
             WiFi = 1,
@@ -135,7 +134,7 @@ namespace Bloom.Publish.BloomPub.wifi
 
             // We must be confident that the local IP address we advertise in the UDP broadcast
             // packet is the same one the network stack will use for the broadcast. Gleaning the
-            // local IP address from a UdpClient usually is the correct one, but unfortunately it
+            // local IP address from a UdpClient usually yields the correct one, but unfortunately it
             // can be different on some machines. When that happens the remote Android gets the
             // wrong address from the advert, and Desktop never hears the Android book request.
             // 
@@ -166,14 +165,12 @@ namespace Bloom.Publish.BloomPub.wifi
                 _localIp = IfaceWifi.IpAddr;
                 _subnetMask = IfaceWifi.NetMask;
                 ifaceDesc = IfaceWifi.Description;
-                Debug.WriteLine("WiFiAdvertiser, local IP = {0} ({1})", _localIp, ifaceDesc); // TEMPORARY
             }
             else
             {
                 _localIp = IfaceEthernet.IpAddr;
                 _subnetMask = IfaceEthernet.NetMask;
                 ifaceDesc = IfaceEthernet.Description;
-                Debug.WriteLine("WiFiAdvertiser, local IP = {0} ({1})", _localIp, ifaceDesc); // TEMPORARY
             }
 
             // The typical broadcast address (255.255.255.255) doesn't work with a raw socket:
@@ -446,7 +443,8 @@ namespace Bloom.Publish.BloomPub.wifi
         // For a given local IP address and subnet mask, construct the appropriate
         // broadcast address.
         //
-        // Philosophy: the subnet mask indicates how to handle the IP address bits --
+        // Rationale:
+        //       The subnet mask indicates how to handle the IP address bits:
         //     - '1' mask bits indicate the "network address" portion of the IP address.
         //       The broadcast address will aim at the same network so just copy the IP
         //       address bits into the same positions of the broadcast address. 'XORing'
@@ -462,7 +460,7 @@ namespace Bloom.Publish.BloomPub.wifi
         //     convert IP address and corresponding subnet mask to byte arrays
         //     create byte array to hold broadcast address result
         //     for each IP address octet and corresponding subnet mask octet, starting with most significant
-        //         compute broadcast address octet per "Philosophy" above
+        //         compute broadcast address octet per "Rationale" above
         //     end
         //     convert broadcast address byte array to IP address string and return it
         //
