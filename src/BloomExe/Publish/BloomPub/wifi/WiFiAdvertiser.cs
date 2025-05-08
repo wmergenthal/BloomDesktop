@@ -185,11 +185,6 @@ namespace Bloom.Publish.BloomPub.wifi
                 return;
             }
 
-            // Log these key values for tech support.
-            Debug.WriteLine("UDP advertising will use: _localIp    = " + _localIp + " (" + ifaceDesc + ")");
-            Debug.WriteLine("                          _subnetMask = " + _subnetMask);
-            Debug.WriteLine("                          _remoteIp   = " + _remoteIp);
-
             try
             {
                 // Set up destination endpoint.
@@ -200,6 +195,11 @@ namespace Bloom.Publish.BloomPub.wifi
                 _sock = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
                 _sock.Bind(_localEP);
 
+                // Log key values for tech support.
+                Debug.WriteLine("UDP advertising will use: _localIp    = {0} ({1})", _localIp, ifaceDesc);
+                Debug.WriteLine("                          _subnetMask = " + _subnetMask);
+                Debug.WriteLine("                          _remoteIp   = {0}:{1}", _remoteEP.Address, _remoteEP.Port);
+
                 // Local and remote are ready. Advertise once per second, indefinitely.
                 while (true)
                 {
@@ -209,6 +209,7 @@ namespace Bloom.Publish.BloomPub.wifi
 
                         // No need to transmit on a separate thread. Just use this one -- it spends
                         // most of its time sleeping, and we are sending only a few hundred bytes.
+                        Debug.WriteLine("WiFiAdvertiser, broadcasting advert to: {0}:{1}", _remoteEP.Address, _remoteEP.Port); // TEMPORARY!
                         _sock.SendTo(_sendBytes, 0, _sendBytes.Length, SocketFlags.None, _remoteEP);
                     }
                     Thread.Sleep(1000);
@@ -305,7 +306,6 @@ namespace Bloom.Publish.BloomPub.wifi
                     continue;
                 }
 
-                Debug.WriteLine("WiFiAdvertiser, checking IP addresses in " + ni.Name);  // TEMPORARY
                 foreach (UnicastIPAddressInformation ip in ipProps.UnicastAddresses)
                 {
                     // We don't consider IPv6 so filter for IPv4 ('InterNetwork')...
@@ -314,13 +314,11 @@ namespace Bloom.Publish.BloomPub.wifi
                         // ...And of these we care only about WiFi and Ethernet.
                         if (ni.NetworkInterfaceType == NetworkInterfaceType.Wireless80211)
                         {
-                            Debug.WriteLine("  WiFi...");  // TEMPORARY
                             currentIfaceMetric = GetMetricForInterface(ipv4Props.Index);
 
                             // Save this interface if its metric is lowest we've seen so far.
                             if (currentIfaceMetric < IfaceWifi.Metric)
                             {
-                                Debug.WriteLine("  updating WiFi metric to " + currentIfaceMetric);  // TEMPORARY
                                 IfaceWifi.IpAddr = ip.Address.ToString();
                                 IfaceWifi.NetMask = ip.IPv4Mask.ToString();
                                 IfaceWifi.Description = ni.Description;
@@ -329,13 +327,11 @@ namespace Bloom.Publish.BloomPub.wifi
                         }
                         else if (ni.NetworkInterfaceType == NetworkInterfaceType.Ethernet)
                         {
-                            Debug.WriteLine("  Ethernet...");  // TEMPORARY
                             currentIfaceMetric = GetMetricForInterface(ipv4Props.Index);
 
                             // Save this interface if its metric is lowest we've seen so far.
                             if (currentIfaceMetric < IfaceEthernet.Metric)
                             {
-                                Debug.WriteLine("  updating Ethernet metric to " + currentIfaceMetric);  // TEMPORARY
                                 IfaceEthernet.IpAddr = ip.Address.ToString();
                                 IfaceEthernet.NetMask = ip.IPv4Mask.ToString();
                                 IfaceEthernet.Description = ni.Description;
@@ -357,16 +353,14 @@ namespace Bloom.Publish.BloomPub.wifi
             //   - Else there is no winner so return none
             if (IfaceWifi.Metric < int.MaxValue)
             {
-                Debug.WriteLine("WiFi wins, interface = " + IfaceWifi.Description);  // TEMPORARY
                 return CommTypeToExpect.WiFi;
             }
             if (IfaceEthernet.Metric < int.MaxValue)
             {
-                Debug.WriteLine("Ethernet wins, interface = " + IfaceEthernet.Description);  // TEMPORARY
                 return CommTypeToExpect.Ethernet;
             }
 
-            Debug.WriteLine("No winner, returning none");  // TEMPORARY
+            Debug.WriteLine("UDP advertising: no suitable network interface found");
             return CommTypeToExpect.None;
         }
 
