@@ -82,11 +82,10 @@ namespace Bloom.Publish.BloomPub.wifi
         {
             public string IpAddr      { get; set; }
             public string Description { get; set; }
-            //public string NetMask     { get; set; } // *** REMOVE? ***
             public int Metric         { get; set; }
         }
 
-        // Hold the current network interface candidates, one for Wi-Fi and one
+        // Holds the current network interface candidates, one for Wi-Fi and one
         // for Ethernet.
         private InterfaceInfo IfaceWifi = new InterfaceInfo();
         private InterfaceInfo IfaceEthernet = new InterfaceInfo();
@@ -129,8 +128,8 @@ namespace Bloom.Publish.BloomPub.wifi
                 message: "Advertising book to Bloom Readers on local network..."
             );
 
-            // We must be confident that the local IP address we advertise in the UDP broadcast
-            // packet is the same one the network stack will use for the broadcast. Gleaning the
+            // We must be confident that the local IP address we advertise *in* the UDP broadcast
+            // packet is the same one the network stack will use *for* the broadcast. Gleaning the
             // local IP address from a UdpClient usually yields the correct one, but unfortunately
             // it can be different on some machines. When that happens the remote Android gets the
             // wrong address from the advert, and Desktop never hears the Android book request.
@@ -139,15 +138,15 @@ namespace Bloom.Publish.BloomPub.wifi
             // the network interface the network stack will use: the interface having the lowest
             // "interface metric."
             //
-            // The PC on which this runs likely has both WiFi and Ethernet. They can both work,
+            // The PC on which this runs likely has both WiFi and Ethernet. Either can work,
             // but preference is given to WiFi. The reason: although this PC can likely go either
-            // way, the Android device only has WiFi. For the book transfer to work both the PC
-            // and the Android must be on the same subnet. If the PC is using Ethernet it may not
-            // be on the same subnet as WiFi, especially on larger networks. The chances that both
+            // way, the Android device only has WiFi. For the book transfer to work both Desktop
+            // and Reader must be on the same subnet. If Desktop is using Ethernet it may not be
+            // on the same subnet as Reader, especially on larger networks. The chances that both
             // PC and Android are on the same subnet are greatest if both are using WiFi.
 
-            // Examine the network interfaces and determine which one the network stack will use.
-            // Use it to set the local IP address we want UdpClient to have.
+            // Examine the network interfaces and determine which will be used for network traffic.
+            // Candidates will get stored in the two results objects.
             CommTypeToExpect ifcResult = GetInterfaceStackWillUse();
 
             if (ifcResult == CommTypeToExpect.None)
@@ -160,53 +159,46 @@ namespace Bloom.Publish.BloomPub.wifi
 
             if (ifcResult == CommTypeToExpect.WiFi)
             {
+                // Network stack will use WiFi.
                 _localIp = IfaceWifi.IpAddr;
                 ifaceDesc = IfaceWifi.Description;
             }
             else
             {
+                // Network stack will use Ethernet.
                 _localIp = IfaceEthernet.IpAddr;
                 ifaceDesc = IfaceEthernet.Description;
             }
 
             try
             {
-                // Now instantiate UdpClient using the correct local IP address.
+                // Now instantiate UdpClient using the local IP address we just got.
                 IPEndPoint epBroadcast = null;
 
-                try
+                epBroadcast = new IPEndPoint(IPAddress.Parse(_localIp), _portToBroadcast);
+                if (epBroadcast == null)
                 {
-                    epBroadcast = new IPEndPoint(IPAddress.Parse(_localIp), _portToBroadcast);
-                    if (epBroadcast == null)
-                    {
-                        Debug.WriteLine("WiFiAdvertiser, ERROR creating IPEndPoint, bail");
-                        return;
-                    }
-
-                    _clientBroadcast = new UdpClient(epBroadcast);
-                    if (_clientBroadcast == null)
-                    {
-                        Debug.WriteLine("WiFiAdvertiser, ERROR creating UdpClient, bail");
-                        return;
-                    }
-
-                    // The doc seems to indicate that EnableBroadcast is required for doing broadcasts.
-                    // In practice it seems to be required on Mono but not on Windows.
-                    // This may be fixed in a later version of one platform or the other, but please
-                    // test both if tempted to remove it.
-                    _clientBroadcast.EnableBroadcast = true;
+                    Debug.WriteLine("WiFiAdvertiser, ERROR creating IPEndPoint, bail");
+                    return;
                 }
-                catch (SocketException e)
+
+                _clientBroadcast = new UdpClient(epBroadcast);
+                if (_clientBroadcast == null)
                 {
-                    // Log it then do nothing.
-                    Debug.WriteLine("WiFiAdvertiser, SocketException-1 = " + e);
-                    Bloom.Utils.MiscUtils.SuppressUnusedExceptionVarWarning(e);
+                    Debug.WriteLine("WiFiAdvertiser, ERROR creating UdpClient, bail");
+                    return;
                 }
+
+                // The doc seems to indicate that EnableBroadcast is required for doing broadcasts.
+                // In practice it seems to be required on Mono but not on Windows.
+                // This may be fixed in a later version of one platform or the other, but please
+                // test both if tempted to remove it.
+                _clientBroadcast.EnableBroadcast = true;
 
                 // Set up destination endpoint.
                 _remoteEP = new IPEndPoint(IPAddress.Parse(_remoteIp), _portToBroadcast);
 
-                // Log key values for tech support.
+                // Log key data for tech support.
                 Debug.WriteLine("UDP advertising will use: _localIp    = {0} ({1})", _localIp, ifaceDesc);
                 Debug.WriteLine("                          _remoteIp   = {0}:{1}", _remoteEP.Address, _remoteEP.Port);
 
@@ -218,7 +210,6 @@ namespace Bloom.Publish.BloomPub.wifi
                         UpdateAdvertisementBasedOnCurrentIpAddress();
 
                         Debug.WriteLine("WiFiAdvertiser, broadcasting advert to: {0}:{1}", _remoteEP.Address, _remoteEP.Port); // TEMPORARY!
-                                                                                                                               //_sock.SendTo(_sendBytes, 0, _sendBytes.Length, SocketFlags.None, _remoteEP);
                         _clientBroadcast.BeginSend(
                             _sendBytes,
                             _sendBytes.Length,
@@ -232,8 +223,10 @@ namespace Bloom.Publish.BloomPub.wifi
             }
             catch (SocketException e)
             {
+                Bloom.Utils.MiscUtils.SuppressUnusedExceptionVarWarning(e);
+                // Log it.
                 Debug.WriteLine("WiFiAdvertiser::Work, SocketException: " + e);
-                // Don't know what _progress.Message() is desired here, add as appropriate.
+                // Need _progress.Message()? Not sure what  is desired. Add as appropriate.
             }
             catch (ThreadAbortException)
             {
