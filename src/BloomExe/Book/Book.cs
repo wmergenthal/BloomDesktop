@@ -1780,6 +1780,7 @@ namespace Bloom.Book
             Storage.MigrateToLevel5CanvasElement();
             Storage.MigrateToLevel6LegacyActivities();
             Storage.MigrateToLevel7BloomCanvas();
+            Storage.MigrateToLevel8RemoveEnterpriseOnly();
 
             Storage.DoBackMigrations();
 
@@ -3628,6 +3629,9 @@ namespace Bloom.Book
             foreach (SafeXmlElement scriptElt in newPageDiv.SafeSelectNodes(".//script[@src]"))
             {
                 var fileName = scriptElt.GetAttribute("src");
+
+                // TODO BL-14565: this is probably out of date; any such file should be part of Bloom Player shared code.
+
                 // Bloom Desktop accesses simpleComprehensionQuiz.js from the output/browser folder.
                 // Bloom Reader uses the copy of that file which comes with bloom-player.
                 // See https://issues.bloomlibrary.org/youtrack/issue/BL-8480.
@@ -3784,7 +3788,6 @@ namespace Bloom.Book
         /// different book, we may need to copy user-defined styles from that book to our own.
         /// </summary>
         /// <returns>true if anything added</returns>
-        /// <param name="templatePage"></param>
         private bool AddMissingStylesFromTemplatePage(IPage templatePage)
         {
             if (templatePage.Book.FolderPath != FolderPath)
@@ -3792,11 +3795,14 @@ namespace Bloom.Book
                 var domForPage = templatePage.Book.GetEditableHtmlDomForPage(templatePage);
                 if (domForPage != null) // possibly null only in unit tests?
                 {
-                    var userStylesOnPage = HtmlDom.GetUserModifiableStylesUsedOnPage(domForPage); // could be empty
+                    var userStylesToAddIfMissing = GetUserModifiedStylesToAddIfMissing(
+                        templatePage,
+                        domForPage
+                    ); // could be empty
                     var existingUserStyles = GetOrCreateUserModifiedStyleElementFromStorage();
                     var newMergedUserStyleXml = HtmlDom.MergeUserStylesOnInsertion(
                         existingUserStyles,
-                        userStylesOnPage,
+                        userStylesToAddIfMissing,
                         out bool didAdd
                     );
                     existingUserStyles.InnerXml = newMergedUserStyleXml;
@@ -3805,6 +3811,14 @@ namespace Bloom.Book
             }
 
             return false;
+        }
+
+        private string GetUserModifiedStylesToAddIfMissing(IPage templatePage, HtmlDom domForPage)
+        {
+            var templateDom = templatePage.Book.OurHtmlDom;
+            if (templateDom.Body.HasAttribute("data-copy-all-styles"))
+                return HtmlDom.GetAllUserModifiableStylesInHead(templateDom.Head);
+            return HtmlDom.GetUserModifiableStylesUsedOnPage(domForPage);
         }
 
         public static string CollectionKind(Book book)
@@ -4317,11 +4331,13 @@ namespace Bloom.Book
                 printingDom.RawDom,
                 p => p.GetAttribute("class").ToLowerInvariant().Contains("bloom-nonprinting")
             );
-            PublishHelper.RemoveEnterprisePagesIfNeeded(
-                _bookData,
-                printingDom,
-                printingDom.GetPageElements().ToList()
-            );
+
+            // Retiring this: We now stop you with the UI before you get this far
+            //PublishHelper.RemoveEnterprisePagesIfNeeded(
+            //    _bookData,
+            //    printingDom,
+            //    printingDom.GetPageElements().ToList()
+            //);
 
             switch (bookletPortion)
             {
@@ -5589,43 +5605,18 @@ namespace Bloom.Book
             }
         }
 
-        public static bool IsPageBloomSubscriptionOnly(SafeXmlElement page)
-        {
-            var classAttrib = page.GetAttribute("class");
-            return classAttrib.Contains("enterprise-only")
-                ||
-                // legacy quiz pages don't have 'enterprise-only'
-                classAttrib.Contains("questions")
-                || page.SafeSelectNodes(".//div[contains(@class,'bloom-widgetContainer')]").Length
-                    > 0;
-        }
-
-        /// <summary>
-        /// Used by the publish tab to tell the user they can't publish a book with canvas elements w/o Enterprise.
-        /// </summary>
-        /// <returns></returns>
-        public string GetNumberOfFirstPageWithCanvasElement()
-        {
-            var pageNodes = RawDom.SafeSelectNodes("//div[contains(@class, 'bloom-page')]");
-            if (pageNodes.Length == 0) // Unexpected!
-                return "";
-            foreach (var pageNode in pageNodes)
-            {
-                var resultNode = pageNode.SelectSingleNode(
-                    ".//div[contains(@class,'" + HtmlDom.kCanvasElementClass + "')]"
-                );
-                if (resultNode == null)
-                    continue;
-                var pageNumberAttribute = pageNode.GetAttribute("data-page-number");
-                if (!string.IsNullOrEmpty(pageNumberAttribute))
-                {
-                    return pageNumberAttribute;
-                }
-                // If at some point we allow canvas element elements on xmatter,
-                // we will need to find and return the 'data-xmatter-page' attribute.
-            }
-            return ""; // Also unexpected!
-        }
+        // Retiring this: We now stop you with the UI before you get this far
+        //public static bool IsPageBloomSubscriptionOnly(SafeXmlElement page)
+        //{
+        //    var classAttrib = page.GetAttribute("class");
+        //    // if there is a data-feature, check the feature registry and determine if it is a subscription feature
+        //    return page.HasAttribute("data-feature")
+        //        ||
+        //        // legacy quiz pages don't have 'data-feature'
+        //        classAttrib.Contains("questions")
+        //        || page.SafeSelectNodes(".//div[contains(@class,'bloom-widgetContainer')]").Length
+        //            > 0;
+        //}
 
         /// <summary>
         /// Given a choice, what language should we use to display text on the page (not in the UI, which is controlled by the UI Language)

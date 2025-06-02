@@ -48,7 +48,10 @@ import {
     CanvasElementManager,
     kBackgroundImageClass
 } from "../../js/CanvasElementManager";
-import { getCanvasElementManager } from "../overlay/canvasElementUtils";
+import {
+    getCanvasElementManager,
+    kCanvasElementSelector
+} from "../overlay/canvasElementUtils";
 import { ThemeChooser } from "./ThemeChooser";
 import GameIntroText, { Instructions } from "./GameIntroText";
 import { getGameType, isPageBloomGame } from "./GameInfo";
@@ -57,6 +60,8 @@ import {
     kImageContainerSelector
 } from "../../js/bloomImages";
 import { doesContainingPageHaveSameSizeMode } from "./gameUtilities";
+import { CanvasSnapProvider } from "../../js/CanvasSnapProvider";
+import { CanvasGuideProvider } from "../../js/CanvasGuideProvider";
 
 // This is the main code that manages the Bloom Games, including Drag Activities.
 // See especially DragActivityControls, which is the main React component for the tool,
@@ -451,13 +456,22 @@ let snappedToExisting = false;
 // but in the Start tab they can be moved). Saves some initial state so we can do snapping,
 // and sets up the mousemove and mouseup handlers that do the actual dragging and snapping.
 const startDraggingTarget = (e: MouseEvent) => {
+    const canvasElementManager = getCanvasElementManager()!;
     // get the mouse cursor position at startup:
     const target = e.currentTarget as HTMLElement;
     targetBeingDragged = target;
     const page = target.closest(".bloom-page") as HTMLElement;
+    const targets = Array.from(
+        page.querySelectorAll("[data-target-of]")
+    ) as HTMLElement[];
+    const canvasElements = Array.from(
+        page.querySelectorAll(kCanvasElementSelector)
+    ) as HTMLElement[];
+    guideProvider.startDrag("move", [...targets, ...canvasElements]);
+
     const scale = page.getBoundingClientRect().width / page.offsetWidth;
     targetInitialPositions = [];
-    page.querySelectorAll("[data-target-of]").forEach((elt: HTMLElement) => {
+    targets.forEach((elt: HTMLElement) => {
         const x = elt.offsetLeft;
         const y = elt.offsetTop;
         targetInitialPositions.push({ x, y, elt });
@@ -472,9 +486,12 @@ const startDraggingTarget = (e: MouseEvent) => {
     targetClickOffsetTop = e.clientY / scale - target.offsetTop;
     page.addEventListener("mouseup", stopDraggingTarget);
     page.addEventListener("mousemove", dragTarget);
-    getCanvasElementManager()!.setActiveElement(draggableOfTarget(target));
+    canvasElementManager.setActiveElement(draggableOfTarget(target));
     dragTarget(e); // some side effects like drawing the arrow we want even if no movement happens.
 };
+
+const snapProvider = new CanvasSnapProvider();
+const guideProvider = new CanvasGuideProvider();
 
 const snapDelta = 30; // review: how close do we want?
 const defaultGapBetweenTargets = 15;
@@ -490,61 +507,70 @@ const dragTarget = (e: MouseEvent) => {
     let deltaRowMin = Number.MAX_VALUE;
     const width = targetBeingDragged.offsetWidth;
     snappedToExisting = false;
-    for (let i = 0; i < targetInitialPositions.length; i++) {
-        const slot = targetInitialPositions[i];
-        const deltaX = slot.x - x;
-        const deltaY = slot.y - y;
-        const delta = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
-        // It's interesting if it is dropped on top of another target(or where it started),
-        // but only if that target is in a row.
-        let inRow = false;
-        if (i > 0 && targetInitialPositions[i - 1].y === slot.y) {
-            inRow = true;
-        }
-        if (
-            i < targetInitialPositions.length - 1 &&
-            targetInitialPositions[i + 1].y === slot.y
-        ) {
-            inRow = true;
-        }
-        if (inRow && delta < deltaMin) {
-            deltaMin = delta;
-            if (delta < snapDelta) {
-                x = slot.x;
-                y = slot.y;
-                snappedToExisting = true;
-            }
-        }
-        // It's also interesting if it is dropped to the right of another target
-        // Todo: possibly also if it is below another one?
-        // Right of it's own start position, which is likely in range initially, is not interesting.
-        if (slot.elt === targetBeingDragged) {
-            continue;
-        }
-        // By default look at a position a bit to the right of the current target.
-        let spacing = width + defaultGapBetweenTargets;
-        if (inRow) {
-            // if the current target is in a row, look at a position the same distance to the right as the row spacing.
-            const row = targetInitialPositions.filter(s => s.y === slot.y);
-            spacing = row[row.length - 1].x - row[row.length - 2].x;
-        }
-        const deltaXRow = slot.x + spacing - x;
-        const deltaRow = Math.sqrt(deltaXRow * deltaXRow + deltaY * deltaY);
-        if (deltaRow < deltaRowMin) {
-            deltaRowMin = deltaRow;
-            // For a "to the right of" position to be interesting, it must be closer to that
-            // position than to any other target
-            if (deltaRow < snapDelta && deltaRow < deltaMin) {
-                if (inRow) {
-                    // If there isn't already a row, we'd only be guessing at spacing
-                    // so don't snap in that direction.
-                    x = slot.x + spacing;
-                }
-                y = slot.y;
-                snappedToExisting = false;
-            }
-        }
-    }
+    // This code tries to snap a dragged target so as to form a row with other targets at a uniform spacing,
+    // including moving others over if a new one gets dragged on top of an existing one.
+    // It conflicts with the new goal of making the targets snap to the grid, so we are not using it for now.
+    // There's probably other code we could delete or comment out that is only needed to support this, but for now,
+    // the main thing is not to have two conflicting snap behaviors.
+    // for (let i = 0; i < targetInitialPositions.length; i++) {
+    //     const slot = targetInitialPositions[i];
+    //     const deltaX = slot.x - x;
+    //     const deltaY = slot.y - y;
+    //     const delta = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+    //     // It's interesting if it is dropped on top of another target(or where it started),
+    //     // but only if that target is in a row.
+    //     let inRow = false;
+    //     if (i > 0 && targetInitialPositions[i - 1].y === slot.y) {
+    //         inRow = true;
+    //     }
+    //     if (
+    //         i < targetInitialPositions.length - 1 &&
+    //         targetInitialPositions[i + 1].y === slot.y
+    //     ) {
+    //         inRow = true;
+    //     }
+    //     if (inRow && delta < deltaMin) {
+    //         deltaMin = delta;
+    //         if (delta < snapDelta) {
+    //             x = slot.x;
+    //             y = slot.y;
+    //             snappedToExisting = true;
+    //         }
+    //     }
+    //     // It's also interesting if it is dropped to the right of another target
+    //     // Todo: possibly also if it is below another one?
+    //     // Right of it's own start position, which is likely in range initially, is not interesting.
+    //     if (slot.elt === targetBeingDragged) {
+    //         continue;
+    //     }
+    //     // By default look at a position a bit to the right of the current target.
+    //     let spacing = width + defaultGapBetweenTargets;
+    //     if (inRow) {
+    //         // if the current target is in a row, look at a position the same distance to the right as the row spacing.
+    //         const row = targetInitialPositions.filter(s => s.y === slot.y);
+    //         spacing = row[row.length - 1].x - row[row.length - 2].x;
+    //     }
+    //     const deltaXRow = slot.x + spacing - x;
+    //     const deltaRow = Math.sqrt(deltaXRow * deltaXRow + deltaY * deltaY);
+    //     if (deltaRow < deltaRowMin) {
+    //         deltaRowMin = deltaRow;
+    //         // For a "to the right of" position to be interesting, it must be closer to that
+    //         // position than to any other target
+    //         if (deltaRow < snapDelta && deltaRow < deltaMin) {
+    //             if (inRow) {
+    //                 // If there isn't already a row, we'd only be guessing at spacing
+    //                 // so don't snap in that direction.
+    //                 x = slot.x + spacing;
+    //             }
+    //             y = slot.y;
+    //             snappedToExisting = false;
+    //         }
+    //     }
+    // }
+
+    const snappedPoint = snapProvider.getPosition(e, x, y);
+    x = snappedPoint.x;
+    y = snappedPoint.y;
 
     targetBeingDragged.style.top = y + "px";
     targetBeingDragged.style.left = x + "px";
@@ -553,6 +579,7 @@ const dragTarget = (e: MouseEvent) => {
     if (draggable) {
         adjustTarget(draggable, targetBeingDragged);
     }
+    guideProvider.duringDrag(targetBeingDragged);
 };
 
 const draggableOfTarget = (
@@ -571,6 +598,8 @@ const draggableOfTarget = (
 };
 
 const stopDraggingTarget = (_: MouseEvent) => {
+    snapProvider.endDrag();
+    guideProvider.endDrag();
     const page = targetBeingDragged.closest(".bloom-page") as HTMLElement;
     if (snappedToExisting) {
         // Move things around so we end up with an evenly spaced row again.
@@ -1134,8 +1163,8 @@ const DragActivityControls: React.FunctionComponent<{
                                         css={draggableWordCss}
                                         l10nKey="EditTab.Toolbox.DragActivity.Letter"
                                         makeTarget={true}
-                                        addClasses="draggable-text"
-                                        userDefinedStyleName="GameDraggableLetterMediumCenter"
+                                        addClasses="draggable-text bloom-noAutoHeight"
+                                        userDefinedStyleName="GameDragMediumCenter"
                                     />
                                 )}
                                 {showImageDraggable && (
@@ -1173,14 +1202,9 @@ const DragActivityControls: React.FunctionComponent<{
                                     css={draggableWordCss}
                                     l10nKey="EditTab.Toolbox.DragActivity.Word"
                                     makeTarget={true}
-                                    addClasses="draggable-text"
+                                    addClasses="draggable-text bloom-noAutoHeight"
                                     hide={!showWordDraggable}
-                                    userDefinedStyleName="GameDraggableWordMediumCenter"
-                                    defaultStyleProps={{
-                                        fontSize: "45px",
-                                        lineHeight: "1",
-                                        textAlign: "center"
-                                    }}
+                                    userDefinedStyleName="GameDragMediumCenter"
                                 />
 
                                 {/* Slider: rather than reinstating this item, make the "selected item is part of answer" control work.
@@ -1380,18 +1404,18 @@ const DragActivityControls: React.FunctionComponent<{
 const GameTextItem: React.FunctionComponent<{
     addClasses?: string;
 }> = props => {
+    // We don't want game text items to autosize, so we add this class to them. (BL-14779)
+    let classesToAdd = props.addClasses ?? "";
+    if (!classesToAdd.includes("bloom-noAutoHeight")) {
+        classesToAdd = classesToAdd + " bloom-noAutoHeight";
+    }
     return (
         <CanvasElementTextItem
             css={textItemCss("14pt")}
             l10nKey="EditTab.Toolbox.DragActivity.Text"
             makeTarget={false}
-            addClasses={props.addClasses}
+            addClasses={classesToAdd.trim()}
             userDefinedStyleName="GameTextMediumCenter"
-            defaultStyleProps={{
-                fontSize: "24pt",
-                lineHeight: "1",
-                textAlign: "center"
-            }}
         />
     );
 };
@@ -1505,11 +1529,6 @@ export const makeDuplicateOfDragBubble = () => {
             }
         }
         setGeneratedDraggableId(duplicate);
-        // I don't think we need this trick for a newly-made canvas element, and it won't work right without attaching
-        // the mutation observer.
-        Array.from(
-            duplicate.getElementsByClassName("bloom-show-en-when-blank")
-        ).forEach(e => e.classList.remove("bloom-show-en-when-blank"));
 
         // Duplicate had better not be locked to contain the same text!
         Array.from(duplicate.querySelectorAll("[data-book]")).forEach(e =>
@@ -1730,81 +1749,12 @@ export class GameTool extends ToolboxToolReactAdaptor {
             // when it's a brand newly-created page.
             getToolboxBundleExports()?.setActiveDragActivityTab(0);
         }
-        this.observeElementsWhereBlankMatters();
-    }
-
-    // Set the bloom-blank class iff the element contains nothing that regex recognizes as a non-whitespace character.
-    public static setBlankClass(element: HTMLElement) {
-        if (element.textContent?.replace(/\s/g, "") === "") {
-            element.classList.add("bloom-blank");
-        } else {
-            element.classList.remove("bloom-blank");
-        }
-    }
-
-    // mutation observers are tricky. There does not appear to be a simple way of getting from the function
-    // arguments to the object that was observed. Even a simple keystroke seems to produce at least three
-    // mutation records, and some of them have detached targets that have no connection to the editable we
-    // want. (Possibly they are CkEditor bookmarks that were inserted and then removed.)
-    // Documentation on what records to expect for different kinds of mutation is poor.
-    // It's definitely possible that one of them is a CharacterNode that doesn't have closest().
-    // However, every change I've tried has at least one record with a target that is either the
-    // bloom-editable or one of its descendants. So we should find it for at least one of them
-    // by navigating up to an element and then using closest().
-    blankObserver = new MutationObserver(mutations => {
-        for (let i = 0; i < mutations.length; i++) {
-            let editable: Node | null = mutations[i].target;
-            while (editable && editable.nodeType !== Node.ELEMENT_NODE)
-                editable = editable.parentNode;
-            if (!editable) continue; // we actually seem to get some disconnected nodes, I don't know why
-            editable = (editable as HTMLElement).closest(".bloom-editable");
-            if (editable) {
-                GameTool.setBlankClass(editable as HTMLElement);
-                return;
-            }
-        }
-    });
-
-    // Elements marked with bloom-show-en-when-blank should not look empty. Usually they are initially,
-    // unless L1 is English, so we have style rules to show the English as a dim overlay
-    // if the bloom-content1 is empty. Unfortunately we can't use :empty because the bloom-editable
-    // usually contains at least an empty <p>. We want the new :blank selector, but it's not
-    // implemented yet. So we use a mutation observer to add the class .bloom-blank to elements
-    // that have bloom-show-en-when-blank on their parent and are bloom-content1, and write rules using that.
-    // This is a bit ugly, but way better than the previous approach of copying English text into
-    // an element marked as being in another language. Apart from the ugliness of that, we couldn't
-    // dim it or make it go away as soon as something is typed.
-    private observeElementsWhereBlankMatters() {
-        const page = GameTool.getBloomPage();
-        if (!page) {
-            return;
-        }
-        const groupsToInit = page.getElementsByClassName(
-            "bloom-show-en-when-blank"
-        );
-        for (let i = 0; i < groupsToInit.length; i++) {
-            const group = groupsToInit[i] as HTMLElement;
-            const l1editable = group.getElementsByClassName(
-                "bloom-content1"
-            )[0];
-            if (!l1editable) {
-                continue;
-            }
-            this.blankObserver.observe(l1editable, {
-                childList: true,
-                subtree: true,
-                characterData: true
-            });
-            GameTool.setBlankClass(l1editable as HTMLElement);
-        }
     }
 
     public detachFromPage() {
         const page = GameTool.getBloomPage();
         if (page) {
             undoPrepareActivity(page);
-            // May as well save a little space in the stored version.
-            doShowAnswersInTargets(false, page);
         }
     }
 }
@@ -2008,10 +1958,15 @@ export const makeTargetForDraggable = (
     if (newLeft + width > canvasElement.parentElement!.clientWidth) {
         newLeft = Math.max(0, left - width - 30);
     }
+    const { x: snapX, y: snapY } = snapProvider.getPosition(
+        undefined,
+        newLeft,
+        newTop
+    );
     // Review: can we do any more to make sure it's visible and not overlapping canvas element?
     // Should we try to avoid overlapping other canvas elements and/or targets?
-    target.style.left = `${newLeft}px`;
-    target.style.top = `${newTop}px`;
+    target.style.left = `${snapX}px`;
+    target.style.top = `${snapY}px`;
     target.style.width = `${width}px`;
     target.style.height = `${height}px`;
     // This allows it to get focus, which allows it to get the shadow effect we want when

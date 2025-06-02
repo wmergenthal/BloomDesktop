@@ -5,28 +5,49 @@
 import theOneLocalizationManager from "../../lib/localizationManager/localizationManager";
 import bloomQtipUtils from "../js/bloomQtipUtils";
 import { MeasureText } from "../../utils/measureText";
-import {
-    CanvasElementManager,
-    theOneCanvasElementManager
-} from "../js/CanvasElementManager";
+import { theOneCanvasElementManager } from "../js/CanvasElementManager";
 import { playingBloomGame } from "../toolbox/games/DragActivityTabControl";
 import { addScrollbarsToPage, cleanupNiceScroll } from "bloom-player";
+import { isInDragActivity } from "../toolbox/games/GameInfo";
 
 interface qtipInterface extends JQuery {
     qtip(options: string): JQuery;
 }
 
+// logically a function of OverflowChecker, but it doesn't need any member variables, and with the
+// way the old JQuery code here is messing with 'this', it's easier to just call it as an independent function
+function getElementsThatCanOverflowOrNeedToBeResized(
+    container: HTMLElement
+): HTMLElement[] {
+    //NB: for some historical reason in March 2014 the calendar still uses textareas
+    // I think .bloom-visibility-code-on is more reliable here than :visible;
+    // possibly this is set up before everything has been computed to be visible?
+    // Note: this can probably be done with querySelectorAll, but a simple substitution
+    // doesn't work (not a valid selector).  I think the problem is that querySelectorAll
+    // doesn't know how to handle the :visible selector. So sticking with JQuery for now.
+    const queryElementsThatCanOverflow =
+        ".bloom-editable.bloom-visibility-code-on, textarea:visible";
+    const potentialResults = $(container)
+        .find(queryElementsThatCanOverflow)
+        .toArray() as HTMLElement[];
+    const results: HTMLElement[] = potentialResults.filter((x: HTMLElement) => {
+        // Ignore things in game targets, they are duplicates that don't need to show overflow
+        if (x.closest("[data-target-of]")) {
+            return false;
+        }
+        return true;
+    });
+    return results;
+}
+
 export default class OverflowChecker {
+    private;
+
     // When a div is overfull, these handlers will add the overflow class so it gets a red background or something
     // But this function should just do some basic checks and ADD the HANDLERS!
     public AddOverflowHandlers(container: HTMLElement) {
-        //NB: for some historical reason in March 2014 the calendar still uses textareas
-        // I think .bloom-visibility-code-on is more reliable here than :visible;
-        // possibly this is set up before everything has been computed to be visible?
-        const queryElementsThatCanOverflow =
-            ".bloom-editable.bloom-visibility-code-on, textarea:visible";
-        const $editablePageElements = $(container).find(
-            queryElementsThatCanOverflow
+        const $editablePageElements = $(
+            getElementsThatCanOverflowOrNeedToBeResized(container)
         );
 
         // BL-1260: disable overflow checking for pages with too many elements
@@ -66,18 +87,26 @@ export default class OverflowChecker {
                 if (e.type === "paste") {
                     // If we're pasting, show as much of the text as possible even it can't all be shown.
                     // See BL-14632.
-                    OverflowChecker.MarkOverflowInternal(editable, false, true);
+                    OverflowChecker.AdjustSizeOrMarkOverflow(
+                        editable,
+                        false,
+                        true
+                    );
                 } else {
-                    OverflowChecker.MarkOverflowInternal(editable);
+                    OverflowChecker.AdjustSizeOrMarkOverflow(editable);
                 }
 
                 //REVIEW: why is this here, in the overflow detection?
 
                 // This will make sure that any language tags on this div stay in position with editing.
                 // Reposition all language tips, not just the tip for this item because sometimes the edit moves other controls.
-                (<qtipInterface>$(queryElementsThatCanOverflow)).qtip(
-                    "reposition"
-                );
+                (<qtipInterface>(
+                    $(
+                        getElementsThatCanOverflowOrNeedToBeResized(
+                            document.body
+                        )
+                    )
+                )).qtip("reposition");
             }, 100); // 100 milliseconds
             e.stopPropagation();
         });
@@ -87,9 +116,11 @@ export default class OverflowChecker {
             .find(".split-pane-component-inner")
             .bind("_splitpaneparentresize", function() {
                 const $this = $(this);
-                $this.find(queryElementsThatCanOverflow).each(function() {
-                    OverflowChecker.CheckForOverflowSoon(this);
-                });
+                $(getElementsThatCanOverflowOrNeedToBeResized($this[0])).each(
+                    function() {
+                        OverflowChecker.AdjustSizeOrMarkOverflowSoon(this);
+                    }
+                );
             });
 
         // Turn off any overflow indicators that might have been leftover from before
@@ -107,12 +138,12 @@ export default class OverflowChecker {
         // on the same element during startup, only one of them really happens. The delay is also
         // helpful in letting the page stabilize before we start resizing overlays.
         for (const editable of $editablePageElements.get()) {
-            OverflowChecker.CheckForOverflowSoon(editable);
+            OverflowChecker.AdjustSizeOrMarkOverflowSoon(editable);
         }
     }
 
     // Actual testable determination of Type I overflow or not
-    // 'public' for testing (2 types of overflow are defined in MarkOverflowInternal below)
+    // 'public' for testing (2 types of overflow are defined in AdjustSizeOrMarkOverflow below)
     public static IsOverflowingSelf(element: HTMLElement): boolean {
         const [overflowX, overflowY] = OverflowChecker.getSelfOverflowAmounts(
             element
@@ -233,6 +264,16 @@ export default class OverflowChecker {
             // scrollHeight is a reliable way to get the information if it is greater than the clientHeight,
             // and means we don't have to worry about scroll position.  (scrollHeight is never less than
             // clientHeight.  See https://developer.mozilla.org/en-US/docs/Web/API/Element/scrollHeight.)
+            // (One odd situation is when lineHeight is small, e.g., less than 1.3 for Andika. In that
+            // situation, a paragraph whose height is otherwise unconstrained is not high enough to show
+            // descenders, and even with a single line of text its scrollHeight is greater than clientHeight.
+            // Our auto-sizing code handles this, making a canvas element big enough to show the descenders
+            // (if any are actually present).
+            // However, when the bloom-editable is empty, we don't get the extra scrollHeight we are adjusting
+            // for. There's a kludge to partly handle this in adjustSizeOfContainingCanvasElementToMatchContent,
+            // but there may be a better way to handle things. I think part of the problem may be that if there
+            // is no actual text, the browser can't really pick a font to display it, so some measurements
+            // can't be precisely made.)
             result = elementClone.scrollHeight;
             if (elementClone.scrollHeight <= elementClone.clientHeight) {
                 // But if scrollHeight is less than or equal to clientHeight, we use our own algorithm.
@@ -258,7 +299,7 @@ export default class OverflowChecker {
     }
 
     // Actual testable determination of Type II overflow or not
-    // 'public' for testing (2 types of overflow are defined in MarkOverflowInternal below)
+    // 'public' for testing (2 types of overflow are defined in AdjustSizeOrMarkOverflow below)
     // returns nearest ancestor that this element overflows
     public static overflowingAncestor(
         element: HTMLElement
@@ -322,21 +363,21 @@ export default class OverflowChecker {
     // several origami elements, and the loop over all of them used to be in the
     // handling of one mouse move. Now, each timeout will be its own event, and
     // hopefully other events can be processed in between if they occur.
-    public static CheckForOverflowSoon(editable: HTMLElement) {
+    public static AdjustSizeOrMarkOverflowSoon(editable: HTMLElement) {
         const timeOut = (editable as any).overflowCheckTimeout;
         if (timeOut) {
             clearTimeout(timeOut);
         }
         (editable as any).overflowCheckTimeout = setTimeout(() => {
             this.CheckOnMinHeight(editable);
-            OverflowChecker.MarkOverflowInternal(editable);
+            OverflowChecker.AdjustSizeOrMarkOverflow(editable);
         }, 1000);
     }
 
     // Checks for overflow on a bloom-page and adds/removes the proper class
     // N.B. This function is specifically designed to be called from within AddOverflowHandler()
     // but is also called from within StyleEditor (and therefore public)
-    public static MarkOverflowInternal(
+    public static AdjustSizeOrMarkOverflow(
         editable: HTMLElement,
         doNotShrink?: boolean,
         growAsMuchAsPossible?: boolean
@@ -410,6 +451,19 @@ export default class OverflowChecker {
             // prevent the spurious overflow markup.
             overflowY = 0;
         }
+
+        let skipType2Overflow = false;
+        if (isInDragActivity(editable)) {
+            // We decided that overflow was just causing too many problems as we tried to wrap
+            // up drag activities. So for now, we are just turning off overflow reporting completely
+            // in drag activities. See BL-14783.
+            // Actually, we would love to just turn off overflow checking completely, but at this
+            // point, it is integrated with the code which resizes the canvas element.
+            // That's also why we can't just filter out these elements in getElementsThatCanOverflowOrNeedToBeResized.
+            overflowY = 0;
+            skipType2Overflow = true;
+        }
+
         if (overflowY > 0 || overflowX > 0) {
             $editable.addClass("overflow");
             const page = $editable.closest(".bloom-page");
@@ -449,13 +503,12 @@ export default class OverflowChecker {
             }
         }
 
+        if (skipType2Overflow) return;
+
         const container = $editable.closest(".marginBox");
         const quizPage = $(container).closest(".simple-comprehension-quiz");
-        //NB: for some historical reason in March 2014 the calendar still uses textareas
-        const queryElementsThatCanOverflow =
-            ".bloom-editable:visible, textarea:visible";
-        const editablePageElements = $(container).find(
-            queryElementsThatCanOverflow
+        const editablePageElements = $(
+            getElementsThatCanOverflowOrNeedToBeResized(container.get(0))
         );
 
         // Type 2 Overflow - We'll check ALL of these for overflow past any ancestor
@@ -542,7 +595,7 @@ export default class OverflowChecker {
             }
         });
         OverflowChecker.UpdatePageOverflow(container.closest(".bloom-page"));
-    } // end MarkOverflowInternal
+    } // end AdjustSizeOrMarkOverflow
 
     // Destroy any qtip on this element that marks overflow, but leave other qtips alone.
     // This restriction is an attempt not to remove bloom hint and source bubbles.

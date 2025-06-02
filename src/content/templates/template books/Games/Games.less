@@ -21,8 +21,6 @@
 // data-activity is put on the bloom-page to indicate the type of activity. Bloom games give it one of the
 //    values in dragActivityTypes (in dragActivityTool.tsx). Some of them are used in selectors here.
 // #target-arrow identifies the arrow that shows the target of the selected draggable in Start mode.
-// bloom-show-en-when-blank identifies a translation group which should display it's English alternative
-//    (dimmed) when the L1 alternative is blank.
 // There are a few others, mostly containing 'slider' that relate to the incomplete drag-word-chooser-slider game.
 
 @import "gamesThemes.less";
@@ -265,6 +263,15 @@
     }
     .drag-activity-wrong & {
         // In the wrong tab, we don't want to see the target at all, but just the dashed box if it's visible.
+        > * {
+            opacity: 0;
+        }
+    }
+    .drag-activity-play
+    // Note, data-show-answers-in-targets might not be set. Default is false.
+        .bloom-page:not([data-show-answers-in-targets="true"])
+        & {
+        // Only show the target contents in play mode if the game creator decided to show them.
         > * {
             opacity: 0;
         }
@@ -612,88 +619,30 @@
     position: absolute;
 }
 
+.numberedPage::after {
+    color: var(--game-page-number-color);
+    --pageNumber-background-color: var(
+        --page-background-color
+    ); // appearance system
+}
+
+// These styles and more are set up in the Games.html template.
+// An attribute on the body (data-copy-all-styles) causes them
+// all to get added when any game page is added to a book.
+// Technically, there is no reason we can't include these defaults
+// which use theme variables directly in the template, too, but by setting
+// the theme variable defaults here, we keep from storing the variable names
+// in the dom. In theory, that means we can change them more easily.
+// It also keeps more of the theming logic in one place.
 .GameHeader-style {
-    font-size: 16pt !important;
-    line-height: 1.5 !important;
-    text-align: center !important;
     color: var(--game-header-color);
     background-color: var(--game-header-bg-color);
 }
-.GameTextSmallStart-style {
-    font-size: 12pt !important;
-    line-height: 1 !important;
-    text-align: start !important;
-    color: var(--game-target-label-color);
-    background-color: transparent;
-}
-.GameTextSmallCenter-style {
-    font-size: 12pt !important;
-    line-height: 1 !important;
-    text-align: center !important;
-    color: var(--game-target-label-color);
-    background-color: transparent;
-}
-.GameTextMediumStart-style {
-    font-size: 24pt !important;
-    line-height: 1 !important;
-    text-align: start !important;
-    color: var(--game-target-label-color);
-    background-color: transparent;
-}
-.GameTextMediumCenter-style {
-    font-size: 24pt !important;
-    line-height: 1 !important;
-    text-align: center !important;
-    color: var(--game-target-label-color);
-    background-color: transparent;
-}
-.GameTextLargeStart-style {
-    font-size: 34pt !important;
-    line-height: 1 !important;
-    text-align: start !important;
-    color: var(--game-target-label-color);
-    background-color: transparent;
-}
+.GameTextSmallStart-style,
+.GameTextSmallCenter-style,
+.GameTextMediumStart-style,
+.GameTextMediumCenter-style,
+.GameTextLargeStart-style,
 .GameTextLargeCenter-style {
-    font-size: 34pt !important;
-    line-height: 1 !important;
-    text-align: center !important;
-    color: var(--game-target-label-color);
-    background-color: transparent;
+    color: var(--game-text-color);
 }
-.GameDraggableWordSmallStart-style {
-    font-size: 16pt !important;
-    line-height: 1 !important;
-    text-align: start !important;
-}
-.GameDraggableWordSmallCenter-style {
-    font-size: 16pt !important;
-    line-height: 1 !important;
-    text-align: center !important;
-}
-.GameDraggableWordMediumStart-style {
-    font-size: 30pt !important;
-    line-height: 1 !important;
-    text-align: start !important;
-}
-.GameDraggableWordMediumCenter-style {
-    font-size: 30pt !important;
-    line-height: 1 !important;
-    text-align: center !important;
-}
-.GameDraggableWordLargeStart-style {
-    font-size: 45pt !important;
-    line-height: 1 !important;
-    text-align: start !important;
-}
-.GameDraggableWordLargeCenter-style {
-    font-size: 45pt !important;
-    line-height: 1 !important;
-    text-align: center !important;
-}
-//.GameDraggableLetterSmallStart-style { font-size: 16pt !important; line-height: 1 !important; text-align: start !important; }
-//.GameDraggableLetterSmallCenter-style { font-size: 16pt !important; line-height: 1 !important; text-align: center !important; }
-//.GameDraggableLetterMediumStart-style { font-size: 24pt !important; line-height: 1 !important; text-align: start !important; }
-//.GameDraggableLetterMediumCenter-style { font-size: 24pt !important; line-height: 1 !important; text-align: center !important; }
-//.GameDraggableLetterLargeStart-style { font-size: 34pt !important; line-height: 1 !important; text-align: start !important; }
-//.GameDraggableLetterLargeCenter-style { font-size: 34pt !important; line-height: 1 !important; text-align: center !important; }

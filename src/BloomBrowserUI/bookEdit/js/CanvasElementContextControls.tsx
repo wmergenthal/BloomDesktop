@@ -146,6 +146,7 @@ const CanvasElementContextControls: React.FunctionComponent<{
     const [currentDraggableTarget, setCurrentDraggableTarget] = useState<
         HTMLElement | undefined
     >();
+    // After deleting a draggable, we may get rendered again, and page will be null.
     const page = props.canvasElement.closest(".bloom-page") as HTMLElement;
     useEffect(() => {
         if (!currentDraggableTargetId) {
@@ -165,7 +166,7 @@ const CanvasElementContextControls: React.FunctionComponent<{
     // The audio menu item states the audio will play when the item is touched.
     // That isn't true yet outside of games, so don't show it.
     const isInDraggableGame = page
-        .getAttribute("data-activity")
+        ?.getAttribute("data-activity")
         ?.startsWith("drag-");
     const canChooseAudioForElement = isInDraggableGame && (hasImage || hasText);
 
@@ -207,20 +208,13 @@ const CanvasElementContextControls: React.FunctionComponent<{
         // Need to include menuOpen so we can re-evaluate if the user has added or removed audio.
     }, [props.canvasElement, props.menuOpen]);
 
-    // These commands apply to all canvas elements (currently none!).
-    const menuOptions: IMenuItemWithSubmenu[] = [];
-    // These to everything except background images
-    if (!isBackgroundImage) {
-        menuOptions.unshift({
-            l10nId: "EditTab.Toolbox.ComicTool.Options.Duplicate",
-            english: "Duplicate",
-            onClick: () => {
-                if (!props.canvasElement) return;
-                makeDuplicateOfDragBubble();
-            },
-            icon: <DuplicateIcon css={getMenuIconCss()} />
-        });
+    if (!page) {
+        // Probably right after deleting the canvas element. Wish we could return early sooner,
+        // but has to be after all the hooks.
+        return null;
     }
+
+    let menuOptions: IMenuItemWithSubmenu[] = [];
     if (hasRectangle) {
         menuOptions.splice(0, 0, {
             l10nId: "EditTab.Toolbox.ComicTool.Options.FillBackground",
@@ -233,7 +227,7 @@ const CanvasElementContextControls: React.FunctionComponent<{
             icon: rectangleHasBackground && <CheckIcon css={getMenuIconCss()} />
         });
     }
-    if (hasText) {
+    if (hasText && !isInDraggableGame) {
         menuOptions.splice(0, 0, {
             l10nId: "EditTab.Toolbox.ComicTool.Options.AddChildBubble",
             english: "Add Child Bubble",
@@ -272,6 +266,21 @@ const CanvasElementContextControls: React.FunctionComponent<{
     if (hasVideo) {
         addVideoMenuItems(menuOptions, videoContainer, setMenuOpen);
     }
+
+    menuOptions.push(divider);
+
+    if (!isBackgroundImage) {
+        menuOptions.push({
+            l10nId: "EditTab.Toolbox.ComicTool.Options.Duplicate",
+            english: "Duplicate",
+            onClick: () => {
+                if (!props.canvasElement) return;
+                makeDuplicateOfDragBubble();
+            },
+            icon: <DuplicateIcon css={getMenuIconCss()} />
+        });
+    }
+
     let deleteEnabled = true;
     if (isBackgroundImage) {
         const fillItem = {
@@ -302,7 +311,7 @@ const CanvasElementContextControls: React.FunctionComponent<{
     }
 
     // last one
-    menuOptions.push(divider, {
+    menuOptions.push({
         l10nId: "Common.Delete",
         english: "Delete",
         disabled: !deleteEnabled,
@@ -336,6 +345,13 @@ const CanvasElementContextControls: React.FunctionComponent<{
             getImageUrlFromImageContainer(imgContainer as HTMLElement)
         );
     };
+
+    // I don't particularly like this, but the logic of when to add items is
+    // so convoluted with most things being added at the beginning of the list instead
+    // the end, that it is almost impossible to reason about. It would be great to
+    // give it a more linear flow, but we're not taking that on just before releasing 6.2a.
+    // But this is also future-proof.
+    menuOptions = cleanUpDividers(menuOptions);
 
     const maxMenuWidth = 260;
 
@@ -525,6 +541,11 @@ const CanvasElementContextControls: React.FunctionComponent<{
                         <MenuIcon color="primary" />
                     </button>
                     <Menu
+                        // if we don't keep the menu mounted, then whenever the menu opens it calculates its size and
+                        // the localizations aren't done yet at that point so it positions itself incorrectly (BL-14549).
+                        // The other option would be to put a resize observer on the menu, and use an action prop and
+                        // call updatePosition() whenever it resizes
+                        keepMounted
                         css={css`
                             ul {
                                 max-width: ${maxMenuWidth}px;
@@ -642,7 +663,7 @@ const CanvasElementContextControls: React.FunctionComponent<{
             // eslint-disable-next-line @typescript-eslint/no-empty-function
             onClick: () => {},
             icon: <VolumeUpIcon css={getMenuIconCss(1, "left:2px;")} />,
-            requiresAnySubscription: true,
+            featureName: "overlay",
             subMenu
         };
     }
@@ -994,7 +1015,7 @@ function addImageMenuOptions(
                     Currently: %0
                 </Span>
             ),
-            requiresAnySubscription: true,
+            featureName: "overlay",
             onClick: () => pasteLink(canvasElement)
 
             /*
@@ -1064,4 +1085,23 @@ function addMenuItemsForDraggable(
             undefined
         )
     });
+}
+
+// Make sure we don't start/end with a divider, and there aren't two in a row.
+function cleanUpDividers(menuItems: IMenuItemWithSubmenu[]) {
+    let lastDividerIndex = -1;
+    const cleanMenuItems = menuItems.filter((option, index) => {
+        if (option === divider) {
+            if (
+                lastDividerIndex === index - 1 ||
+                index === menuItems.length - 1
+            ) {
+                return false;
+            } else {
+                lastDividerIndex = index;
+            }
+        }
+        return true;
+    });
+    return cleanMenuItems;
 }
