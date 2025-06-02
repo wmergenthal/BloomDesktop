@@ -199,8 +199,8 @@ namespace Bloom.Publish.BloomPub.wifi
                 _remoteEP = new IPEndPoint(IPAddress.Parse(_remoteIp), _portToBroadcast);
 
                 // Log key data for tech support.
-                Debug.WriteLine("UDP advertising will use: _localIp    = {0} ({1})", _localIp, ifaceDesc);
-                Debug.WriteLine("                          _remoteIp   = {0}:{1}", _remoteEP.Address, _remoteEP.Port);
+                Debug.WriteLine("UDP advertising will use: _localIp  = {0}:{1} ({2})", _localIp, epBroadcast.Port, ifaceDesc);
+                Debug.WriteLine("                          _remoteIp = {0}:{1}", _remoteEP.Address, _remoteEP.Port);
 
                 // Local and remote are ready. Advertise once per second, indefinitely.
                 while (true)
@@ -386,15 +386,27 @@ namespace Bloom.Publish.BloomPub.wifi
         //
         int GetMetricForInterface(int interfaceIndex)
         {
-            int bestMetric;
+            // Initialize to "worst" possible metric (Win10 Pro: 2^31 - 1).
+            // It can only get better from there!
+            int bestMetric = int.MaxValue;
 
             // Preliminary: call with a null buffer ('size') to learn how large a
             // buffer is needed to hold a copy of the routing table.
             int size = 0;
             GetIpForwardTable(IntPtr.Zero, ref size, false);
 
-            // 'size' now shows how large a buffer is needed, so allocate it.
-            IntPtr tableBuf = Marshal.AllocHGlobal(size);
+            IntPtr tableBuf;
+
+            try
+            {
+                // 'size' now shows how large a buffer is needed, so allocate it.
+                tableBuf = Marshal.AllocHGlobal(size);
+            }
+            catch (OutOfMemoryException e)
+            {
+                Debug.WriteLine("  GetMetricForInterface, ERROR creating table: " + e);
+                return bestMetric;
+            }
 
             try
             {
@@ -405,8 +417,8 @@ namespace Bloom.Publish.BloomPub.wifi
                 {
                     // It is tempting to add a dealloc call here before bailing, but
                     // don't. The dealloc in the finally-block *will* be done (I checked).
-                    Console.WriteLine("  GetMetricForInterface, ERROR, GetIpForwardTable() = {0}, returning {1}", error, int.MaxValue);
-                    return int.MaxValue;
+                    Debug.WriteLine("  GetMetricForInterface, ERROR, GetIpForwardTable() = {0}, returning {1}", error, bestMetric);
+                    return bestMetric;
                 }
 
                 // Get number of routing table entries.
@@ -414,10 +426,6 @@ namespace Bloom.Publish.BloomPub.wifi
 
                 // Advance pointer past the integer to point at 1st row.
                 IntPtr rowPtr = IntPtr.Add(tableBuf, 4);
-
-                // Initialize to "worst" possible metric (Win10 Pro: 2^31 - 1).
-                // It can only get better from there!
-                bestMetric = int.MaxValue;
 
                 // Walk the routing table looking for rows involving the the network
                 // interface passed in. For each such row/route, check the metric.
@@ -431,6 +439,13 @@ namespace Bloom.Publish.BloomPub.wifi
                         bestMetric = Math.Min(bestMetric, row.dwForwardMetric1);
                     }
                     rowPtr = IntPtr.Add(rowPtr, Marshal.SizeOf<MIB_IPFORWARDROW>());
+                }
+            }
+            catch (Exception e)
+            {
+                if (e is AccessViolationException || e is MissingMethodException)
+                {
+                    Debug.WriteLine("  GetMetricForInterface, ERROR: " + e);
                 }
             }
             finally

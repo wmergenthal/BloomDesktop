@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
+using System.Text;
 using System.Threading;
 using Bloom.Publish.BloomPUB.wifi;
 
@@ -92,6 +93,12 @@ namespace Bloom.Publish.BloomPub.wifi
                     }
 
                     byte[] bytes = _listener.Receive(ref groupEP); // waits for packet from Android.
+
+                    // DEBUG ONLY
+                    Debug.WriteLine("WM, UDPListener, got {0} bytes (raising \'NewMessageReceived\'):", bytes.Length);
+                    var bytesToString = Encoding.ASCII.GetString(bytes, 0, bytes.Length);
+                    Debug.WriteLine("  " + bytesToString.Substring(0, bytes.Length));
+                    // END DEBUG
 
                     //raise event
                     NewMessageReceived?.Invoke(this, new AndroidMessageArgs(bytes));
