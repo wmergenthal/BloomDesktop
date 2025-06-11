@@ -40,7 +40,10 @@ namespace Bloom.Publish.BloomPub.wifi
         private IPEndPoint _localEP;
         private IPEndPoint _remoteEP;
         private string _localIp = "";
-        private string _remoteIp = "255.255.255.255";  // UDP broadcast address (doesn't work with Socket)
+        private string _remoteIp = "";  // will hold UDP broadcast address
+        private string _subnetMask = "";
+        private string _currentIpAddress = "";
+        private string _cachedIpAddress = "";
 
         // Layout of a row in the IPv4 routing table.
         [StructLayout(LayoutKind.Sequential)]
@@ -62,7 +65,7 @@ namespace Bloom.Publish.BloomPub.wifi
             public int dwForwardMetric5;
         }
 
-        // Holds a copy of the IPv4 routing table, which we will examine
+        // Hold a copy of the IPv4 routing table, which we will examine
         // to find which row/route has the lowest "interface metric".
         [StructLayout(LayoutKind.Sequential)]
         private struct MIB_IPFORWARDTABLE
@@ -77,15 +80,16 @@ namespace Bloom.Publish.BloomPub.wifi
         [DllImport("iphlpapi.dll", SetLastError = true)]
         static extern int GetIpForwardTable(IntPtr pIpForwardTable, ref int pdwSize, bool bOrder);
 
-        // Holds relevant network interface attributes.
+        // Hold relevant network interface attributes.
         private class InterfaceInfo
         {
             public string IpAddr      { get; set; }
             public string Description { get; set; }
+            public string NetMask     { get; set; }
             public int Metric         { get; set; }
         }
 
-        // Holds the current network interface candidates, one for Wi-Fi and one
+        // Hold the current network interface candidates, one for Wi-Fi and one
         // for Ethernet.
         private InterfaceInfo IfaceWifi = new InterfaceInfo();
         private InterfaceInfo IfaceEthernet = new InterfaceInfo();
@@ -102,9 +106,7 @@ namespace Bloom.Publish.BloomPub.wifi
         // ChorusHub uses 5911 to advertise. Bloom looks for a port for its server at 8089 and 10 following ports.
         // https://en.wikipedia.org/wiki/List_of_TCP_and_UDP_port_numbers shows a lot of ports in use around 8089,
         // but nothing between 5900 and 5931. Decided to use a number similar to ChorusHub.
-        private const int _portToBroadcast = 5913; // must match port in BloomReader NewBookListenerService.startListenForUDPBroadcast
-        private string _currentIpAddress = "";
-        private string _cachedIpAddress = "";
+        private const int _portForBroadcast = 5913; // must match port in BloomReader NewBookListenerService.startListenForUDPBroadcast
         private byte[] _sendBytes; // Data we send in each advertisement packet
         private readonly WebSocketProgress _progress;
 
@@ -132,7 +134,7 @@ namespace Bloom.Publish.BloomPub.wifi
             // packet is the same one the network stack will use *for* the broadcast. Gleaning the
             // local IP address from a UdpClient usually yields the correct one, but unfortunately
             // it can be different on some machines. When that happens the remote Android gets the
-            // wrong address from the advert, and Desktop never hears the Android book request.
+            // wrong address from the advert, and Desktop won't get the Android book request.
             // 
             // To mitigate, change how the UdpClient is instantiated. Assign it the IP address of
             // the network interface the network stack will use: the interface having the lowest
@@ -161,21 +163,32 @@ namespace Bloom.Publish.BloomPub.wifi
             {
                 // Network stack will use WiFi.
                 _localIp = IfaceWifi.IpAddr;
+                _subnetMask = IfaceWifi.NetMask;
                 ifaceDesc = IfaceWifi.Description;
             }
             else
             {
                 // Network stack will use Ethernet.
                 _localIp = IfaceEthernet.IpAddr;
+                _subnetMask = IfaceEthernet.NetMask;
                 ifaceDesc = IfaceEthernet.Description;
+            }
+
+            // Now that we know the IP address and subnet mask in effect, calculate
+            // the broadcast address to use.
+            _remoteIp = GetDirectedBroadcastAddress(_localIp, _subnetMask);
+            if (_remoteIp.Length == 0)
+            {
+                Debug.WriteLine("WiFiAdvertiser, ERROR: can't get broadcast address, bail");
+                return;
             }
 
             try
             {
-                // Now instantiate UdpClient using the local IP address we just got.
+                // Instantiate UdpClient using the local IP address we just got.
                 IPEndPoint epBroadcast = null;
 
-                epBroadcast = new IPEndPoint(IPAddress.Parse(_localIp), _portToBroadcast);
+                epBroadcast = new IPEndPoint(IPAddress.Parse(_localIp), _portForBroadcast);
                 if (epBroadcast == null)
                 {
                     Debug.WriteLine("WiFiAdvertiser, ERROR creating IPEndPoint, bail");
@@ -196,10 +209,11 @@ namespace Bloom.Publish.BloomPub.wifi
                 _clientBroadcast.EnableBroadcast = true;
 
                 // Set up destination endpoint.
-                _remoteEP = new IPEndPoint(IPAddress.Parse(_remoteIp), _portToBroadcast);
+                _remoteEP = new IPEndPoint(IPAddress.Parse(_remoteIp), _portForBroadcast);
 
                 // Log key data for tech support.
                 Debug.WriteLine("UDP advertising will use: _localIp  = {0}:{1} ({2})", _localIp, epBroadcast.Port, ifaceDesc);
+                Debug.WriteLine("                          _subnetMask = " + _subnetMask);
                 Debug.WriteLine("                          _remoteIp = {0}:{1}", _remoteEP.Address, _remoteEP.Port);
 
                 // Local and remote are ready. Advertise once per second, indefinitely.
@@ -226,7 +240,7 @@ namespace Bloom.Publish.BloomPub.wifi
                 Bloom.Utils.MiscUtils.SuppressUnusedExceptionVarWarning(e);
                 // Log it.
                 Debug.WriteLine("WiFiAdvertiser::Work, SocketException: " + e);
-                // Need _progress.Message()? Not sure what  is desired. Add as appropriate.
+                // Don't know what _progress.Message() is desired here, add as appropriate.
             }
             catch (ThreadAbortException)
             {
@@ -278,8 +292,8 @@ namespace Bloom.Publish.BloomPub.wifi
         //     'IfaceWifi', and similarly the current best candidate for Ethernet will
         //     be in 'IfaceEthernet'.
         //   - After assessment inform calling code of the winner by returning an enum
-        //     indicating which of the candidate structs to draw network info from: WiFi,
-        //     Ethernet, or neither.
+        //     indicating which of the candidate structs to draw from: WiFi, Ethernet,
+        //     or neither.
         //
         private CommTypeToExpect GetInterfaceStackWillUse()
         {
@@ -329,6 +343,7 @@ namespace Bloom.Publish.BloomPub.wifi
                             if (currentIfaceMetric < IfaceWifi.Metric)
                             {
                                 IfaceWifi.IpAddr = ip.Address.ToString();
+                                IfaceWifi.NetMask = ip.IPv4Mask.ToString();
                                 IfaceWifi.Description = ni.Description;
                                 IfaceWifi.Metric = currentIfaceMetric;
                             }
@@ -341,6 +356,7 @@ namespace Bloom.Publish.BloomPub.wifi
                             if (currentIfaceMetric < IfaceEthernet.Metric)
                             {
                                 IfaceEthernet.IpAddr = ip.Address.ToString();
+                                IfaceEthernet.NetMask = ip.IPv4Mask.ToString();
                                 IfaceEthernet.Description = ni.Description;
                                 IfaceEthernet.Metric = currentIfaceMetric;
                             }
@@ -357,7 +373,7 @@ namespace Bloom.Publish.BloomPub.wifi
             // Now choose the winner, if there is one:
             //   - If we saw an active WiFi interface, return that
             //   - Else if we saw an active Ethernet interface, return that
-            //   - Else there is no winner, so return none
+            //   - Else there is no winner so return none
             if (IfaceWifi.Metric < int.MaxValue)
             {
                 return CommTypeToExpect.WiFi;
@@ -404,19 +420,19 @@ namespace Bloom.Publish.BloomPub.wifi
             }
             catch (OutOfMemoryException e)
             {
-                Debug.WriteLine("  GetMetricForInterface, ERROR creating table: " + e);
+                Debug.WriteLine("  GetMetricForInterface, ERROR creating buffer: " + e);
                 return bestMetric;
             }
 
             try
             {
                 // Copy the routing table into buffer for examination.
-                // If the result code is not 0 then something went wrong.
                 int error = GetIpForwardTable(tableBuf, ref size, false);
                 if (error != 0)
                 {
-                    // It is tempting to add a dealloc call here before bailing, but
-                    // don't. The dealloc in the finally-block *will* be done (I checked).
+                    // Something went wrong so bail.
+                    // It is tempting to add a dealloc call here, but don't. The
+                    // dealloc in the 'finally' block *will* be done (I checked).
                     Debug.WriteLine("  GetMetricForInterface, ERROR, GetIpForwardTable() = {0}, returning {1}", error, bestMetric);
                     return bestMetric;
                 }
@@ -454,6 +470,74 @@ namespace Bloom.Publish.BloomPub.wifi
             }
 
             return bestMetric;
+        }
+
+        // Construct a network interface's directed broadcast address.
+        //
+        // This is different from 255.255.255.255, the "limited broadcast address" which
+        // applies only to 0.0.0.0, the "zero network" beyond which broadcasts will never
+        // be propagated (https://en.wikipedia.org/wiki/Broadcast_address).
+        // But a directed broadcast CAN be forwarded to other subnets, if the network's
+        // routers are configured to allow it. They often aren't but at least the potential
+        // is there. For a thorough explanation see:
+        // https://www.practicalnetworking.net/stand-alone/local-broadcast-vs-directed-broadcast/
+        //
+        // So, to maximize the chances that a Reader will hear book adverts we use the
+        // directed broadcast address. It is generated from an interface's IP address and
+        // subnet mask, both of which are passed in to this function.
+        //
+        // Bit-wise rationale:
+        //       The subnet mask indicates how to handle the IP address bits.
+        //     - '1' mask bits: the "network address" portion of the IP address.
+        //       The broadcast address aims at the same network so just copy the IP
+        //       address bits into the same positions of the broadcast address.
+        //       'ORing' IP bits with 1-mask-bits-inverted-to-0 keeps them all
+        //       unchanged.
+        //     - '0' mask bits: the "host ID" portion of the IP address. We want to
+        //       fill this portion of the broadcast address with '1's so all hosts on
+        //       the subnet will see the transmission.
+        //       'ORing' IP bits with 0-mask-bits-inverted-to-1 makes them all 1.
+        //
+        // Function operation:
+        //     convert IP address and subnet mask strings to byte arrays
+        //     create byte array to hold broadcast address result
+        //     FOR each IP address octet and corresponding subnet mask octet, starting with most significant
+        //         compute broadcast address octet per "Bit-wise rationale" above
+        //     END
+        //     convert broadcast address byte array to IP address string and return it
+        //
+        // Note: the local IP and mask inputs are not explicitly checked. Any issues they
+        // may have will become apparent by the catch block firing. 
+        //
+        private string GetDirectedBroadcastAddress(string ipIn, string maskIn)
+        {
+            try
+            {
+                IPAddress ipAddress = IPAddress.Parse(ipIn);
+                IPAddress subnetMask = IPAddress.Parse(maskIn);
+                byte[] ipBytes = ipAddress.GetAddressBytes();
+                byte[] maskBytes = subnetMask.GetAddressBytes();
+
+                if (ipBytes.Length != maskBytes.Length)
+                {
+                    Console.WriteLine("CalculateBroadcastAddress, ERROR, length mismatch, IP vs mask: {0}, {1}",
+                        ipBytes.Length, maskBytes.Length);
+                }
+
+                byte[] bcastBytes = new byte[ipBytes.Length];
+                for (int i = 0; i < ipBytes.Length; i++)
+                {
+                    //bcastBytes[i] = (byte)(ipBytes[i] | (maskBytes[i] ^ 255));
+                    bcastBytes[i] = (byte)(ipBytes[i] | ~maskBytes[i]);
+                }
+
+                return new IPAddress(bcastBytes).ToString();
+            }
+            catch (Exception)
+            {
+                // Invalid IP address or subnet mask.
+                return "";
+            }
         }
 
         public void Stop()
