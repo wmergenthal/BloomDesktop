@@ -23,6 +23,16 @@ block headContent
 		document.addEventListener("DOMContentLoaded", function() {
 			let attempts = 0;
 			const maxAttempts = 100;
+			let failureShown = false;
+
+			const showInitializationFailure = function() {
+				if (failureShown) {
+					return;
+				}
+				failureShown = true;
+				window.showWorkspaceInitializationFailure("failed to load workspace bundle after 100 attempts");
+			};
+
 			// In some browser startup paths, the module can load after DOMContentLoaded.
 			// Retry briefly so root initialization still runs when the bundle appears late.
 			const run = function() {
@@ -37,6 +47,8 @@ block headContent
 				attempts += 1;
 				if (attempts !== maxAttempts) {
 					window.setTimeout(run, 100);
+				} else {
+					showInitializationFailure();
 				}
 			};
 

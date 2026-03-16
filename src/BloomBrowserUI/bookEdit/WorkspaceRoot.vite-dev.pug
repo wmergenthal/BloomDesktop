@@ -104,6 +104,7 @@ block endBodyScripts
 		workspaceRootModule.startWorkspaceModeInitialization();
 		} catch (e) {
 		console.error('Failed to initialize Vite dev WorkspaceRoot:', e);
+		window.showWorkspaceInitializationFailure('failed to initialize workspace root');
 		}
 		}
 
