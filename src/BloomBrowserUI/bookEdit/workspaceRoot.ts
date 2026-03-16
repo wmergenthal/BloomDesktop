@@ -344,7 +344,22 @@ const isTopLevelWindow = (): boolean => {
 };
 
 const shouldAutoInitializeWorkspaceRoot = (): boolean => {
-    return isTopLevelWindow() && window.bloomIsWorkspaceRoot === true;
+    if (!isTopLevelWindow()) {
+        return false;
+    }
+
+    // In some startup paths (especially external browser launch), we can reach this bundle
+    // before marker setup is completely reliable. Fall back to known root-only DOM IDs so
+    // URL-based mode/iframe restoration still runs.
+    if (window.bloomIsWorkspaceRoot === true) {
+        return true;
+    }
+
+    return (
+        !!document.getElementById("workspaceContentHost") ||
+        !!document.getElementById("page") ||
+        !!document.getElementById("pageList")
+    );
 };
 
 // When an iframe is not in use, we set its src to about:blank. This at least frees up memory,
@@ -389,7 +404,7 @@ const initializeWorkspaceModeFromUrl = (): void => {
 
     const url = new URL(window.location.href);
     const mode = normalizeWorkspaceMode(url.searchParams.get("mode"));
-    applyWorkspaceModeClass(mode);
+    setWorkspaceMode(mode);
 
     const pageIframeReady = restoreIframeSrcFromUrlIfNeeded(
         "page",
@@ -423,10 +438,23 @@ const initializeWorkspaceModeFromUrl = (): void => {
 // CURRENTPAGE.htm or after using Refresh, params in the URL tell us what mode to be
 // in and where to find the page and pagelist, if relevant. It has proved difficult
 // (more so in Chrome than Edge, for some unknown reason) to get this initialization
-// to happen reliably, so we try a number of times.
+// to happen reliably, so we try a number of times. At one point there was some
+// evidence that even 40 tries was not enough.
 const initializeWorkspaceModeFromUrlWithRetries = (): void => {
     let attempts = 0;
-    const maxAttempts = 40;
+    const maxAttempts = 100;
+    let failureShown = false;
+
+    const showInitializationFailure = (): void => {
+        if (failureShown) {
+            return;
+        }
+        failureShown = true;
+
+        // Make startup failure unmistakable when root initialization never reaches a ready state.
+        document.documentElement.innerHTML =
+            "<head><meta charset='utf-8'></head><body>failed to init workspace after 100 attempts</body>";
+    };
 
     const runAttempt = (): void => {
         initializeWorkspaceModeFromUrl();
@@ -456,7 +484,12 @@ const initializeWorkspaceModeFromUrlWithRetries = (): void => {
 
         const fullyReady =
             hasBody && modeIsReady && pageIsReady && pageListIsReady;
-        if (fullyReady || attempts >= maxAttempts) {
+        if (fullyReady) {
+            return;
+        }
+
+        if (attempts >= maxAttempts) {
+            showInitializationFailure();
             return;
         }
 
@@ -468,12 +501,22 @@ const initializeWorkspaceModeFromUrlWithRetries = (): void => {
 };
 
 let workspaceModeInitializationStarted = false;
+let workspaceModeInitializationListenersInstalled = false;
 
+// We use several strategies to try to make sure we run this critical initialization.
+// It has proved difficult to get it run reliably and only when appropriate (i.e., when
+// the code is loaded into the root, workspace document and it is sufficiently loaded
+// to do the work. We only need it to happen once, however, when things are actually ready.)
 const tryStartWorkspaceModeInitialization = (): void => {
+    // This stops things if one of the other strategies already got things to a point where
+    // we can initialize succesfully.
     if (workspaceModeInitializationStarted) {
         return;
     }
 
+    // Tests here will fail if our code got loaded into an iframe rather than the correct
+    // root document, and also if things are not loaded enough (the iframes we want to
+    // initialize are not present).
     if (!shouldAutoInitializeWorkspaceRoot()) {
         return;
     }
@@ -482,17 +525,35 @@ const tryStartWorkspaceModeInitialization = (): void => {
     initializeWorkspaceModeFromUrlWithRetries();
 };
 
-tryStartWorkspaceModeInitialization();
-document.addEventListener(
-    "DOMContentLoaded",
-    tryStartWorkspaceModeInitialization,
-    {
+// Code is included in the workspaceRoot.pug file (and the vite version) to call this when
+// DOM content is loaded, that is the main document and all code, including modules, is parsed
+// and any immediate code (such as setting bundle root variables) has executed.
+// It is also called by the line of code right after this declaration.
+// So we guard against multiple calls, but make very sure that tryStartWorkspaceModeInitialization
+// is not missed, even if we might call it more than once. It has its own guards against that.
+export const startWorkspaceModeInitialization = (): void => {
+    if (workspaceModeInitializationListenersInstalled) {
+        tryStartWorkspaceModeInitialization();
+        return;
+    }
+
+    workspaceModeInitializationListenersInstalled = true;
+
+    tryStartWorkspaceModeInitialization();
+
+    document.addEventListener(
+        "DOMContentLoaded",
+        tryStartWorkspaceModeInitialization,
+        {
+            once: true,
+        },
+    );
+    window.addEventListener("load", tryStartWorkspaceModeInitialization, {
         once: true,
-    },
-);
-window.addEventListener("load", tryStartWorkspaceModeInitialization, {
-    once: true,
-});
+    });
+};
+
+startWorkspaceModeInitialization();
 
 export function setWorkspaceMode(mode: string): void {
     if (!isTopLevelWindow()) {
@@ -565,6 +626,7 @@ interface WorkspaceBundleApi {
     showAboutDialogFromWorkspaceRoot: typeof showAboutDialogFromWorkspaceRoot;
     showRequiresSubscriptionDialog: typeof showRequiresSubscriptionDialog;
     showRegistrationDialogFromWorkspaceRoot: typeof showRegistrationDialogFromWorkspaceRoot;
+    startWorkspaceModeInitialization: typeof startWorkspaceModeInitialization;
     setWorkspaceMode: typeof setWorkspaceMode;
     showAdjustTimingsDialogFromWorkspaceRoot: typeof showAdjustTimingsDialogFromWorkspaceRoot;
     setZoom: typeof setZoom;
@@ -605,6 +667,7 @@ window.workspaceBundle = {
     showAboutDialogFromWorkspaceRoot,
     showRequiresSubscriptionDialog,
     showRegistrationDialogFromWorkspaceRoot,
+    startWorkspaceModeInitialization,
     setWorkspaceMode,
     showAdjustTimingsDialogFromWorkspaceRoot:
         showAdjustTimingsDialogFromWorkspaceRoot,

@@ -258,11 +258,15 @@ namespace Bloom.Workspace
             if (_workspaceRootDocumentLoaded || _mainBrowser == null)
                 return;
 
-            _mainBrowser.Navigate(
+            // Use a stable simulated id so external-browser URLs can always target the
+            // same workspace root document instead of a transient per-navigation URL.
+            var workspaceRootUrl = BloomServer.PutFixedSimulatedDomForId(
+                "workspaceRoot",
                 GetWorkspaceRootDocument(),
-                setAsCurrentPageForDebugging: true,
-                source: InMemoryHtmlFileSource.Frame
+                InMemoryHtmlFileSource.Frame
             );
+            BloomServer.SetWorkspaceRootUrlForDebugging(workspaceRootUrl);
+            _mainBrowser.Navigate(workspaceRootUrl, cleanupFileAfterNavigating: false);
             _workspaceRootDocumentLoaded = true;
         }
 
@@ -1335,9 +1339,29 @@ namespace Bloom.Workspace
 
         private void SyncWorkspaceRootModeToTab(WorkspaceTab tab)
         {
-            BloomServer.SetCurrentWorkspaceModeForDebugging(GetWorkspaceModeName(tab));
+            var mode = GetWorkspaceModeName(tab);
+            BloomServer.SetCurrentWorkspaceModeForDebugging(mode);
+
+            // There was some indication at one point that this could execute in a frame other than the workspace root.
+            // I don't see how this is possible but, just in case, decided to keep this defensive code.
+            // Target window.top explicitly so tab changes always update the root workspace bundle.
             _mainBrowser?.RunJavascriptFireAndForget(
-                $"workspaceBundle.setWorkspaceMode('{GetWorkspaceModeName(tab)}');"
+                $@"(function() {{
+                    const root = (window.top && window.top.window) ? window.top : window;
+                    const fallback = window;
+                    const modeToSet = '{mode}';
+                    const rootBundle = root.workspaceBundle;
+                    const fallbackBundle = fallback.workspaceBundle;
+
+                    if (rootBundle && typeof rootBundle.setWorkspaceMode === 'function') {{
+                        rootBundle.setWorkspaceMode(modeToSet);
+                        return;
+                    }}
+
+                    if (fallbackBundle && typeof fallbackBundle.setWorkspaceMode === 'function') {{
+                        fallbackBundle.setWorkspaceMode(modeToSet);
+                    }}
+                }})();"
             );
         }
 
