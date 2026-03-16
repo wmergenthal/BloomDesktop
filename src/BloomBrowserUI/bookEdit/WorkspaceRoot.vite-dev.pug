@@ -100,7 +100,8 @@ block endBodyScripts
 
 
 		// Finally, load the app entry.
-		await import('http://localhost:5173/bookEdit/workspaceRoot.ts');
+		const workspaceRootModule = await import('http://localhost:5173/bookEdit/workspaceRoot.ts');
+		workspaceRootModule.startWorkspaceModeInitialization();
 		} catch (e) {
 		console.error('Failed to initialize Vite dev WorkspaceRoot:', e);
 		}

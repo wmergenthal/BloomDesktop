@@ -20,3 +20,25 @@ block headContent
 		window.bloomIsWorkspaceRoot = true;
 	script(src='/bloom/workspaceBundle.js' type='module')
 	script.
+		document.addEventListener("DOMContentLoaded", function() {
+			let attempts = 0;
+			const maxAttempts = 100;
+			// In some browser startup paths, the module can load after DOMContentLoaded.
+			// Retry briefly so root initialization still runs when the bundle appears late.
+			const run = function() {
+				const hasBundle = !!window.workspaceBundle;
+				const hasStart = !!window.workspaceBundle?.startWorkspaceModeInitialization;
+
+				if (hasStart) {
+					window.workspaceBundle.startWorkspaceModeInitialization();
+					return;
+				}
+
+				attempts += 1;
+				if (attempts !== maxAttempts) {
+					window.setTimeout(run, 100);
+				}
+			};
+
+			run();
+		}, { once: true });
