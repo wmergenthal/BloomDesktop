@@ -359,14 +359,30 @@ const CanvasToolControls: React.FunctionComponent = () => {
             };
 
             // BL-8537: If we are choosing "caption" style, we make sure that the background color is opaque.
-            const backgroundColorArray =
-                currentBubble?.getBubbleSpec()?.backgroundColors;
+            // (We need this to cover the black rectangle that produces the shadow effect.)
+            const backgroundColorArray = currentBubble
+                ?.getBubbleSpec()
+                ?.backgroundColors?.slice();
             if (
                 newStyle === "caption" &&
                 backgroundColorArray &&
                 backgroundColorArray.length === 1
             ) {
-                backgroundColorArray[0] = setOpaque(backgroundColorArray[0]);
+                // transparent becomes black when made opaque, which is probably not useful,
+                // so go with what is probably expected for a caption.
+                if (isFullyTransparent(backgroundColorArray[0])) {
+                    const defaultCaptionBackgroundColors =
+                        getDefaultCaptionBackgroundColors();
+                    backgroundColorArray.splice(
+                        0,
+                        backgroundColorArray.length,
+                        ...defaultCaptionBackgroundColors,
+                    );
+                } else {
+                    backgroundColorArray[0] = setOpaque(
+                        backgroundColorArray[0],
+                    );
+                }
             }
 
             // Avoid setting backgroundColorArray if it's just undefined.
@@ -1167,6 +1183,20 @@ function setOpaque(color: string) {
     firstColor.setAlpha(1.0);
     return firstColor.toHexString();
 }
+
+function isFullyTransparent(color: string): boolean {
+    return new tinycolor(color).getAlpha() === 0;
+}
+
+function getDefaultCaptionBackgroundColors(): string[] {
+    const whiteToCalico = TextBackgroundColors.find(
+        (item) => item.name === "whiteToCalico",
+    );
+    return whiteToCalico?.colors
+        ? [...whiteToCalico.colors]
+        : ["white", "#DFB28B"];
+}
+
 function isBubble(item: BubbleSpec | undefined): boolean {
     // "none" is the style assigned to the plain text box.
     return !!item && item.style !== "none" && item.style !== "caption";
